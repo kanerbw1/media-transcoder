@@ -20,6 +20,7 @@ import {
   Folder,
 } from 'lucide-react';
 import { MediaItem } from '../types';
+import { analyzeMediaForChromecast } from '../utils/chromecastSpecs';
 
 interface MediaLibraryViewProps {
   mediaItems: MediaItem[];
@@ -68,6 +69,7 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [sendingNtfyId, setSendingNtfyId] = useState<string | null>(null);
   const [expandedShows, setExpandedShows] = useState<Record<string, boolean>>({});
+  const [overwriteMap, setOverwriteMap] = useState<Record<string, boolean>>({});
 
   const handleCopyCommand = async (command: string, id: string) => {
     let success = false;
@@ -543,41 +545,66 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({
                                     </ul>
                                   </div>
 
-                                  {item.recommendation && (
-                                    <div className="mt-2 pt-2 border-t border-amber-500/20">
-                                      <div className="flex items-center justify-between mb-1.5">
-                                        <span className="text-[11px] font-bold text-slate-200 flex items-center gap-1 font-mono uppercase">
-                                          <Terminal className="w-3.5 h-3.5 text-indigo-400" />
-                                          FFmpeg Command ({item.recommendation.estimatedSpeed}):
-                                        </span>
+                                  {item.recommendation && (() => {
+                                    const isOverwrite = !!overwriteMap[item.id];
+                                    const activeCmd = analyzeMediaForChromecast(item, undefined, isOverwrite).recommendation.suggestedFfmpegCommand;
 
-                                        <button
-                                          onClick={() => handleCopyCommand(item.recommendation!.suggestedFfmpegCommand, item.id)}
-                                          className="inline-flex items-center px-2 py-0.5 text-[10px] font-semibold bg-slate-800 hover:bg-slate-700 text-indigo-300 border border-slate-700 rounded transition cursor-pointer font-mono"
+                                    return (
+                                      <div className="mt-2 pt-2 border-t border-amber-500/20">
+                                        <div className="flex flex-wrap items-center justify-between gap-2 mb-1.5">
+                                          <span className="text-[11px] font-bold text-slate-200 flex items-center gap-1 font-mono uppercase">
+                                            <Terminal className="w-3.5 h-3.5 text-indigo-400" />
+                                            FFmpeg Command ({item.recommendation.estimatedSpeed}):
+                                          </span>
+
+                                          <div className="flex items-center gap-2">
+                                            <label
+                                              title="Toggle between saving as .optimized file vs overwriting original file"
+                                              className="inline-flex items-center gap-1.5 text-[10px] font-medium text-slate-300 hover:text-white cursor-pointer select-none bg-slate-900/90 px-2 py-0.5 rounded border border-slate-700/80"
+                                            >
+                                              <input
+                                                type="checkbox"
+                                                checked={isOverwrite}
+                                                onChange={(e) =>
+                                                  setOverwriteMap((prev) => ({
+                                                    ...prev,
+                                                    [item.id]: e.target.checked,
+                                                  }))
+                                                }
+                                                className="w-3 h-3 rounded border-slate-700 bg-slate-950 text-indigo-500 focus:ring-indigo-500 cursor-pointer"
+                                              />
+                                              <span>Overwrite original</span>
+                                            </label>
+
+                                            <button
+                                              onClick={() => handleCopyCommand(activeCmd, item.id)}
+                                              className="inline-flex items-center px-2 py-0.5 text-[10px] font-semibold bg-slate-800 hover:bg-slate-700 text-indigo-300 border border-slate-700 rounded transition cursor-pointer font-mono"
+                                            >
+                                              {copiedId === item.id ? (
+                                                <>
+                                                  <Check className="w-3 h-3 mr-1 text-emerald-400" />
+                                                  Copied!
+                                                </>
+                                              ) : (
+                                                <>
+                                                  <Copy className="w-3 h-3 mr-1" />
+                                                  Copy Command
+                                                </>
+                                              )}
+                                            </button>
+                                          </div>
+                                        </div>
+
+                                        <pre
+                                          onClick={() => handleCopyCommand(activeCmd, item.id)}
+                                          title="Click to copy command"
+                                          className="p-2.5 bg-slate-950 hover:bg-slate-900/80 text-emerald-400 font-mono text-[10px] rounded overflow-x-auto border border-slate-800 leading-relaxed cursor-pointer select-all transition"
                                         >
-                                          {copiedId === item.id ? (
-                                            <>
-                                              <Check className="w-3 h-3 mr-1 text-emerald-400" />
-                                              Copied!
-                                            </>
-                                          ) : (
-                                            <>
-                                              <Copy className="w-3 h-3 mr-1" />
-                                              Copy Command
-                                            </>
-                                          )}
-                                        </button>
+                                          {activeCmd}
+                                        </pre>
                                       </div>
-
-                                      <pre
-                                        onClick={() => handleCopyCommand(item.recommendation!.suggestedFfmpegCommand, item.id)}
-                                        title="Click to copy command"
-                                        className="p-2.5 bg-slate-950 hover:bg-slate-900/80 text-emerald-400 font-mono text-[10px] rounded overflow-x-auto border border-slate-800 leading-relaxed cursor-pointer select-all transition"
-                                      >
-                                        {item.recommendation.suggestedFfmpegCommand}
-                                      </pre>
-                                    </div>
-                                  )}
+                                    );
+                                  })()}
                                 </div>
                               )}
                             </div>
@@ -771,41 +798,66 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({
                         </div>
 
                         {/* Suggested FFmpeg Bash Command */}
-                        {item.recommendation && (
-                          <div className="mt-3 pt-3 border-t border-amber-500/20">
-                            <div className="flex items-center justify-between mb-2">
-                              <span className="text-xs font-bold text-slate-200 flex items-center gap-1.5 font-mono uppercase">
-                                <Terminal className="w-3.5 h-3.5 text-indigo-400" />
-                                FFmpeg Bash Command ({item.recommendation.estimatedSpeed}):
-                              </span>
+                        {item.recommendation && (() => {
+                          const isOverwrite = !!overwriteMap[item.id];
+                          const activeCmd = analyzeMediaForChromecast(item, undefined, isOverwrite).recommendation.suggestedFfmpegCommand;
 
-                              <button
-                                onClick={() => handleCopyCommand(item.recommendation!.suggestedFfmpegCommand, item.id)}
-                                className="inline-flex items-center px-2.5 py-1 text-[11px] font-semibold bg-slate-800 hover:bg-slate-700 text-indigo-300 border border-slate-700 rounded transition cursor-pointer font-mono"
+                          return (
+                            <div className="mt-3 pt-3 border-t border-amber-500/20">
+                              <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                                <span className="text-xs font-bold text-slate-200 flex items-center gap-1.5 font-mono uppercase">
+                                  <Terminal className="w-3.5 h-3.5 text-indigo-400" />
+                                  FFmpeg Bash Command ({item.recommendation.estimatedSpeed}):
+                                </span>
+
+                                <div className="flex items-center gap-3">
+                                  <label
+                                    title="Toggle between saving as .optimized file vs overwriting original file"
+                                    className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-300 hover:text-white cursor-pointer select-none bg-slate-900 px-2.5 py-1 rounded border border-slate-700/80"
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      checked={isOverwrite}
+                                      onChange={(e) =>
+                                        setOverwriteMap((prev) => ({
+                                          ...prev,
+                                          [item.id]: e.target.checked,
+                                        }))
+                                      }
+                                      className="w-3.5 h-3.5 rounded border-slate-700 bg-slate-950 text-indigo-500 focus:ring-indigo-500 cursor-pointer"
+                                    />
+                                    <span>Overwrite original file</span>
+                                  </label>
+
+                                  <button
+                                    onClick={() => handleCopyCommand(activeCmd, item.id)}
+                                    className="inline-flex items-center px-2.5 py-1 text-[11px] font-semibold bg-slate-800 hover:bg-slate-700 text-indigo-300 border border-slate-700 rounded transition cursor-pointer font-mono"
+                                  >
+                                    {copiedId === item.id ? (
+                                      <>
+                                        <Check className="w-3.5 h-3.5 mr-1 text-emerald-400" />
+                                        Copied!
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Copy className="w-3.5 h-3.5 mr-1" />
+                                        Copy FFmpeg Command
+                                      </>
+                                    )}
+                                  </button>
+                                </div>
+                              </div>
+
+                              <pre
+                                onClick={() => handleCopyCommand(activeCmd, item.id)}
+                                title="Click to copy command"
+                                className="p-3 bg-slate-950 hover:bg-slate-900/80 text-emerald-400 font-mono text-[11px] rounded overflow-x-auto border border-slate-800 shadow-inner leading-relaxed cursor-pointer select-all transition"
                               >
-                                {copiedId === item.id ? (
-                                  <>
-                                    <Check className="w-3.5 h-3.5 mr-1 text-emerald-400" />
-                                    Copied!
-                                  </>
-                                ) : (
-                                  <>
-                                    <Copy className="w-3.5 h-3.5 mr-1" />
-                                    Copy FFmpeg Command
-                                  </>
-                                )}
-                              </button>
+                                {activeCmd}
+                              </pre>
                             </div>
-
-                            <pre
-                              onClick={() => handleCopyCommand(item.recommendation!.suggestedFfmpegCommand, item.id)}
-                              title="Click to copy command"
-                              className="p-3 bg-slate-950 hover:bg-slate-900/80 text-emerald-400 font-mono text-[11px] rounded overflow-x-auto border border-slate-800 shadow-inner leading-relaxed cursor-pointer select-all transition"
-                            >
-                              {item.recommendation.suggestedFfmpegCommand}
-                            </pre>
-                          </div>
-                        )}
+                          );
+                        })()}
                       </div>
                     )}
                   </div>

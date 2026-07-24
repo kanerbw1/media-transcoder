@@ -23,7 +23,8 @@ export interface AnalysisResult {
 
 export function analyzeMediaForChromecast(
   item: Partial<MediaItem>,
-  profile: ChromecastProfile = DEFAULT_CHROMECAST_PROFILE
+  profile: ChromecastProfile = DEFAULT_CHROMECAST_PROFILE,
+  overwriteOriginal: boolean = false
 ): AnalysisResult {
   const reasons: string[] = [];
   const streams = item.streams || [];
@@ -147,14 +148,21 @@ export function analyzeMediaForChromecast(
   }
 
   // Construct shell command
-  const outputPath = `"${dirName}/${nameWithoutExt}.optimized.${targetExt}"`;
   const inputPath = `"${rawPath}"`;
+  const tempPath = `"${dirName}/${nameWithoutExt}.tmp.${targetExt}"`;
+  const finalDestPath = `"${rawPath}"`;
+  const optPath = `"${dirName}/${nameWithoutExt}.optimized.${targetExt}"`;
+
+  const outputPath = overwriteOriginal
+    ? `${tempPath} && mv -f ${tempPath} ${finalDestPath}`
+    : optPath;
 
   let suggestedFfmpegCommand = `ffmpeg -i ${inputPath} ${vCmd} ${aCmd} ${sCmd} -map 0 ${outputPath}`;
 
   if (subtitleNeedsExtraction && !videoNeedsReencode && !audioNeedsReencode) {
     // If only bitmap subtitles are causing the issue, show command to extract SRT sidecar or strip image subs
-    suggestedFfmpegCommand = `# Step 1: Strip image subtitles causing burn-in & remux stream\nffmpeg -i ${inputPath} ${vCmd} ${aCmd} -sn ${outputPath}\n\n# Optional: Extract subtitle track to external SRT sidecar if text-based:\nffmpeg -i ${inputPath} -map 0:s:0 "${dirName}/${nameWithoutExt}.en.srt"`;
+    const step1Out = overwriteOriginal ? `${tempPath} && mv -f ${tempPath} ${finalDestPath}` : optPath;
+    suggestedFfmpegCommand = `# Step 1: Strip image subtitles causing burn-in & remux stream\nffmpeg -i ${inputPath} ${vCmd} ${aCmd} -sn ${step1Out}\n\n# Optional: Extract subtitle track to external SRT sidecar if text-based:\nffmpeg -i ${inputPath} -map 0:s:0 "${dirName}/${nameWithoutExt}.en.srt"`;
   } else if (!videoNeedsReencode && audioNeedsReencode) {
     // Remux only (Lightning fast!)
     suggestedFfmpegCommand = `# Audio Transcode (Audibly transparent E-AC-3 @ 768k / AC-3 @ 640k):\nffmpeg -i ${inputPath} -c:v copy ${aCmd} ${sCmd} -map 0 ${outputPath}`;
