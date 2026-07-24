@@ -69,10 +69,54 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({
   const [sendingNtfyId, setSendingNtfyId] = useState<string | null>(null);
   const [expandedShows, setExpandedShows] = useState<Record<string, boolean>>({});
 
-  const handleCopyCommand = (command: string, id: string) => {
-    navigator.clipboard.writeText(command);
-    setCopiedId(id);
-    setTimeout(() => setCopiedId(null), 2500);
+  const handleCopyCommand = async (command: string, id: string) => {
+    let success = false;
+
+    // Method 1: Modern navigator.clipboard API
+    if (navigator && navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+      try {
+        await navigator.clipboard.writeText(command);
+        success = true;
+      } catch (err) {
+        console.warn('navigator.clipboard.writeText failed, trying execCommand fallback:', err);
+      }
+    }
+
+    // Method 2: Fallback using temporary textarea + document.execCommand('copy')
+    if (!success) {
+      try {
+        const textArea = document.createElement('textarea');
+        textArea.value = command;
+        // Make element non-visible but part of DOM so Firefox/Wayland can focus and select
+        textArea.style.position = 'fixed';
+        textArea.style.top = '0';
+        textArea.style.left = '0';
+        textArea.style.width = '2em';
+        textArea.style.height = '2em';
+        textArea.style.padding = '0';
+        textArea.style.border = 'none';
+        textArea.style.outline = 'none';
+        textArea.style.boxShadow = 'none';
+        textArea.style.background = 'transparent';
+        
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+
+        success = document.execCommand('copy');
+        document.body.removeChild(textArea);
+      } catch (err) {
+        console.error('execCommand copy failed:', err);
+      }
+    }
+
+    if (success) {
+      setCopiedId(id);
+      setTimeout(() => setCopiedId(null), 2500);
+    } else {
+      // Fallback feedback if clipboard is completely blocked
+      alert(`Could not automatically copy to clipboard. Please select the command and press Ctrl+C:\n\n${command}`);
+    }
   };
 
   const handleSendNtfyClick = async (item: MediaItem) => {
@@ -525,7 +569,11 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({
                                         </button>
                                       </div>
 
-                                      <pre className="p-2.5 bg-slate-950 text-emerald-400 font-mono text-[10px] rounded overflow-x-auto border border-slate-800 leading-relaxed">
+                                      <pre
+                                        onClick={() => handleCopyCommand(item.recommendation!.suggestedFfmpegCommand, item.id)}
+                                        title="Click to copy command"
+                                        className="p-2.5 bg-slate-950 hover:bg-slate-900/80 text-emerald-400 font-mono text-[10px] rounded overflow-x-auto border border-slate-800 leading-relaxed cursor-pointer select-all transition"
+                                      >
                                         {item.recommendation.suggestedFfmpegCommand}
                                       </pre>
                                     </div>
@@ -749,7 +797,11 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({
                               </button>
                             </div>
 
-                            <pre className="p-3 bg-slate-950 text-emerald-400 font-mono text-[11px] rounded overflow-x-auto border border-slate-800 shadow-inner leading-relaxed">
+                            <pre
+                              onClick={() => handleCopyCommand(item.recommendation!.suggestedFfmpegCommand, item.id)}
+                              title="Click to copy command"
+                              className="p-3 bg-slate-950 hover:bg-slate-900/80 text-emerald-400 font-mono text-[11px] rounded overflow-x-auto border border-slate-800 shadow-inner leading-relaxed cursor-pointer select-all transition"
+                            >
                               {item.recommendation.suggestedFfmpegCommand}
                             </pre>
                           </div>
