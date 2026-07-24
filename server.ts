@@ -61,14 +61,21 @@ async function dispatchNtfyNotification(item: MediaItem, customTopic?: string): 
   const fullNtfyUrl = `${baseUrl}/${topic}`;
 
   const title = `⚠️ Transcode Alert: ${item.title}`;
-  
-  let body = `File: ${item.fileName}\nLocation: ${item.filePath}\nSize: ${(item.fileSizeBytes / (1024 * 1024 * 1024)).toFixed(2)} GB\n\n`;
-  body += `Transcode Reasons:\n${item.transcodeReasons.map((r) => `• ${r}`).join('\n')}\n\n`;
-  
+  const sizeGB = (item.fileSizeBytes / (1024 * 1024 * 1024)).toFixed(2);
+
+  let body = `**📁 File:** \`${item.fileName}\`\n`;
+  body += `**💾 Size:** ${sizeGB} GB\n`;
+  body += `**📍 Path:** \`${item.filePath}\`\n\n`;
+
+  if (item.transcodeReasons && item.transcodeReasons.length > 0) {
+    body += `**⚠️ Transcode Issues:**\n`;
+    body += item.transcodeReasons.map((r) => `• ${r}`).join('\n') + '\n\n';
+  }
+
   if (item.recommendation) {
-    body += `Recommendation: ${item.recommendation.summary}\n`;
-    if (ntfy.includeFfmpegCommand) {
-      body += `\nFFmpeg Command:\n${item.recommendation.suggestedFfmpegCommand}`;
+    body += `**💡 Recommendation:**\n${item.recommendation.summary}\n`;
+    if (ntfy.includeFfmpegCommand && item.recommendation.suggestedFfmpegCommand) {
+      body += `\n**🛠️ Suggested FFmpeg Command:**\n\`\`\`bash\n${item.recommendation.suggestedFfmpegCommand}\n\`\`\``;
     }
   }
 
@@ -93,17 +100,20 @@ async function dispatchNtfyNotification(item: MediaItem, customTopic?: string): 
     };
     const priorityValue = priorityMap[ntfy.priority || 'high'] || 4;
 
-    // Use JSON body payload so unicode characters (emojis like ⚠️) in titles/messages do not break HTTP headers
+    // Use JSON body payload so unicode characters and markdown render beautifully in ntfy mobile and web
     const payload = {
       topic,
       title,
       message: body,
       priority: priorityValue,
       tags: ntfy.tags && ntfy.tags.length > 0 ? ntfy.tags : ['clapper', 'warning', 'tv'],
+      markdown: true,
     };
 
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
+      'Markdown': 'true',
+      'X-Markdown': 'true',
     };
 
     if (ntfy.authToken) {
@@ -472,7 +482,7 @@ async function startServer() {
   // Vite middleware in dev mode
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: { middlewareMode: true, allowedHosts: true },
       appType: 'spa',
     });
     app.use(vite.middlewares);
