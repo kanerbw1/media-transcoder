@@ -8,7 +8,7 @@ import { analyzeMediaForChromecast, DEFAULT_CHROMECAST_PROFILE } from './src/uti
 import { getProcessedInitialMedia } from './src/utils/mockMediaGenerator';
 
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
 
 app.use(express.json());
