@@ -13,8 +13,8 @@ const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
 app.use(express.json());
 
-// In-Memory Application State
-let appConfig: AppConfig = {
+// Default Application State
+const DEFAULT_APP_CONFIG: AppConfig = {
   ntfy: {
     serverUrl: process.env.NTFY_URL || 'http://homelab:100/',
     topic: process.env.NTFY_TOPIC || 'jellyfin-transcode',
@@ -50,7 +50,63 @@ let appConfig: AppConfig = {
   autoScanEnabled: true,
 };
 
-let mediaDatabase: MediaItem[] = getProcessedInitialMedia();
+const CONFIG_FILE_PATH = path.join(process.cwd(), 'app_config.json');
+const MEDIA_DB_FILE_PATH = path.join(process.cwd(), 'media_db.json');
+
+function loadConfigFromFile(): AppConfig {
+  try {
+    if (fs.existsSync(CONFIG_FILE_PATH)) {
+      const data = fs.readFileSync(CONFIG_FILE_PATH, 'utf-8');
+      const parsed = JSON.parse(data);
+      return {
+        ...DEFAULT_APP_CONFIG,
+        ...parsed,
+        ntfy: {
+          ...DEFAULT_APP_CONFIG.ntfy,
+          ...(parsed.ntfy || {}),
+        },
+        directories: Array.isArray(parsed.directories) ? parsed.directories : DEFAULT_APP_CONFIG.directories,
+      };
+    }
+  } catch (err) {
+    console.error('Failed to load app_config.json:', err);
+  }
+  return DEFAULT_APP_CONFIG;
+}
+
+function saveConfigToFile(config: AppConfig) {
+  try {
+    fs.writeFileSync(CONFIG_FILE_PATH, JSON.stringify(config, null, 2), 'utf-8');
+  } catch (err) {
+    console.error('Failed to save app_config.json:', err);
+  }
+}
+
+function loadMediaDatabaseFromFile(): MediaItem[] {
+  try {
+    if (fs.existsSync(MEDIA_DB_FILE_PATH)) {
+      const data = fs.readFileSync(MEDIA_DB_FILE_PATH, 'utf-8');
+      const parsed = JSON.parse(data);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed;
+      }
+    }
+  } catch (err) {
+    console.error('Failed to load media_db.json:', err);
+  }
+  return getProcessedInitialMedia();
+}
+
+function saveMediaDatabaseToFile(media: MediaItem[]) {
+  try {
+    fs.writeFileSync(MEDIA_DB_FILE_PATH, JSON.stringify(media, null, 2), 'utf-8');
+  } catch (err) {
+    console.error('Failed to save media_db.json:', err);
+  }
+}
+
+let appConfig: AppConfig = loadConfigFromFile();
+let mediaDatabase: MediaItem[] = loadMediaDatabaseFromFile();
 let notificationLogs: NotificationLog[] = [];
 
 // Helper function to dispatch ntfy notifications
@@ -208,6 +264,7 @@ app.get('/api/config', (req: Request, res: Response) => {
 app.post('/api/config', (req: Request, res: Response) => {
   if (req.body) {
     appConfig = { ...appConfig, ...req.body };
+    saveConfigToFile(appConfig);
   }
   res.json({ status: 'ok', config: appConfig });
 });
@@ -356,6 +413,9 @@ app.post('/api/scan', async (req: Request, res: Response) => {
 
   // Also trigger alerts for existing simulated transcode items if requested
   const itemsNeedingTranscode = mediaDatabase.filter((m) => m.needsTranscode);
+
+  saveConfigToFile(appConfig);
+  saveMediaDatabaseToFile(mediaDatabase);
   
   res.json({
     status: 'ok',
@@ -403,6 +463,7 @@ app.post('/api/ntfy/test', async (req: Request, res: Response) => {
   const overrideTopic = topic || appConfig.ntfy.topic;
   if (serverUrl) {
     appConfig.ntfy.serverUrl = serverUrl;
+    saveConfigToFile(appConfig);
   }
 
   const result = await dispatchNtfyNotification(sampleItem, overrideTopic);
