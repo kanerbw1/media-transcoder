@@ -273,6 +273,13 @@ app.get('/api/media', (req: Request, res: Response) => {
   res.json(mediaDatabase);
 });
 
+app.delete('/api/media/:id', (req: Request, res: Response) => {
+  const { id } = req.params;
+  mediaDatabase = mediaDatabase.filter((m) => m.id !== id);
+  saveMediaDatabaseToFile(mediaDatabase);
+  res.json({ status: 'ok', totalMediaCount: mediaDatabase.length });
+});
+
 app.get('/api/logs', (req: Request, res: Response) => {
   res.json(notificationLogs);
 });
@@ -299,6 +306,12 @@ app.post('/api/directories/test', (req: Request, res: Response) => {
     res.json({ exists: false, isDirectory: false, error: err.message });
   }
 });
+
+const isSubpath = (parent: string, child: string) => {
+  if (child === parent) return true;
+  const p = parent.endsWith('/') || parent.endsWith('\\') ? parent : parent + '/';
+  return child.startsWith(p);
+};
 
 // Trigger directory scan & analyze files
 app.post('/api/scan', async (req: Request, res: Response) => {
@@ -336,7 +349,17 @@ app.post('/api/scan', async (req: Request, res: Response) => {
         };
 
         const foundFiles = readFilesRecursively(dir.path);
+        const foundFilesSet = new Set(foundFiles);
         dir.itemCount = foundFiles.length;
+
+        // Prune items in mediaDatabase that belong to this scanned directory but are no longer present on disk
+        mediaDatabase = mediaDatabase.filter((m) => {
+          const isFromThisDir = m.directory === dir.path || isSubpath(dir.path, m.filePath);
+          if (isFromThisDir) {
+            return foundFilesSet.has(m.filePath);
+          }
+          return true;
+        });
 
         for (const filePath of foundFiles) {
           const fileName = path.basename(filePath);
