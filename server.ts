@@ -60,7 +60,13 @@ async function dispatchNtfyNotification(item: MediaItem, customTopic?: string): 
   const topic = customTopic || ntfy.topic || 'jellyfin-transcode';
   const fullNtfyUrl = `${baseUrl}/${topic}`;
 
-  const title = `⚠️ Transcode Alert: ${item.title}`;
+  let cleanTitle = item.title || '';
+  if (cleanTitle.toLowerCase().startsWith('transcode alert for:')) {
+    cleanTitle = cleanTitle.replace(/^transcode alert for:\s*/i, '');
+  } else if (cleanTitle.toLowerCase().startsWith('transcode alert:')) {
+    cleanTitle = cleanTitle.replace(/^transcode alert:\s*/i, '');
+  }
+  const title = `⚠️ Transcode Alert: ${cleanTitle}`;
   const sizeGB = (item.fileSizeBytes / (1024 * 1024 * 1024)).toFixed(2);
 
   let body = `**📁 File:** \`${item.fileName}\`\n`;
@@ -99,44 +105,58 @@ async function dispatchNtfyNotification(item: MediaItem, customTopic?: string): 
       urgent: 5,
     };
     const priorityValue = priorityMap[ntfy.priority || 'high'] || 4;
+    const tagsList = ntfy.tags && ntfy.tags.length > 0 ? ntfy.tags : ['clapper', 'warning', 'tv'];
 
-    // Use JSON body payload so unicode characters and markdown render beautifully in ntfy mobile and web
+    // Standard ntfy JSON publishing requires POSTing to the ROOT server URL (e.g. http://homelab:100/)
+    let jsonServerUrl = baseUrl;
+    if (jsonServerUrl.endsWith(`/${topic}`)) {
+      jsonServerUrl = jsonServerUrl.substring(0, jsonServerUrl.length - (topic.length + 1));
+    }
+    const rootUrl = `${jsonServerUrl}/`;
+
     const payload = {
       topic,
       title,
       message: body,
       priority: priorityValue,
-      tags: ntfy.tags && ntfy.tags.length > 0 ? ntfy.tags : ['clapper', 'warning', 'tv'],
+      tags: tagsList,
       markdown: true,
     };
 
-    const headers: Record<string, string> = {
+    const jsonHeaders: Record<string, string> = {
       'Content-Type': 'application/json',
-      'Markdown': 'true',
-      'X-Markdown': 'true',
     };
 
     if (ntfy.authToken) {
-      headers['Authorization'] = `Bearer ${ntfy.authToken}`;
+      jsonHeaders['Authorization'] = `Bearer ${ntfy.authToken}`;
     }
 
-    // Attempt POST with JSON body to topic URL or base URL
-    let response = await fetch(fullNtfyUrl, {
+    // 1. Primary: POST JSON payload to root ntfy server URL
+    let response = await fetch(rootUrl, {
       method: 'POST',
-      headers,
+      headers: jsonHeaders,
       body: JSON.stringify(payload),
     });
 
+    // 2. Fallback: If root URL fails or returns error, POST plain text body to topic URL with headers
     if (!response.ok) {
-      // Fallback try base server URL with topic in JSON payload
-      const fallbackResponse = await fetch(baseUrl, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(payload),
-      });
-      if (fallbackResponse.ok) {
-        response = fallbackResponse;
+      const topicUrl = `${baseUrl}/${topic}`;
+      const textHeaders: Record<string, string> = {
+        'Title': title,
+        'Priority': String(priorityValue),
+        'Tags': tagsList.join(','),
+        'Markdown': 'yes',
+      };
+
+      if (ntfy.authToken) {
+        textHeaders['Authorization'] = `Bearer ${ntfy.authToken}`;
       }
+
+      response = await fetch(topicUrl, {
+        method: 'POST',
+        headers: textHeaders,
+        body,
+      });
     }
 
     logEntry.statusCode = response.status;
