@@ -167,11 +167,16 @@ export function analyzeMediaForChromecast(
     // Remux only (Lightning fast!)
     suggestedFfmpegCommand = `# Audio Transcode (Audibly transparent E-AC-3 @ 768k / AC-3 @ 640k):\nffmpeg -i ${inputPath} -c:v copy ${aCmd} ${sCmd} -map 0 ${outputPath}`;
   } else if (videoNeedsReencode) {
-    // Primary Intel QuickSync (QSV / libvpl) hardware encoding + High Quality CPU Fallback
-    const qsvCmd = `ffmpeg -hwaccel qsv -i ${inputPath} -c:v hevc_qsv -preset medium -global_quality 18 ${aCmd} ${sCmd} -map 0 ${outputPath}`;
+    // Guaranteed CPU Transcode (Visually transparent CRF 18, works on any system without GPU permission errors)
     const cpuCmd = `ffmpeg -i ${inputPath} ${vCmd} ${aCmd} ${sCmd} -map 0 ${outputPath}`;
-    
-    suggestedFfmpegCommand = `# Primary: Intel QuickSync (QSV Hardware Acceleration for i7-7700T / HD 630):\n${qsvCmd}\n\n# Fallback: High-Quality CPU Transcode (if GPU access permissions are restricted):\n${cpuCmd}`;
+    const qsvCmd = `ffmpeg -init_hw_device qsv=hw -filter_hw_device hw -i ${inputPath} -c:v hevc_qsv -preset medium -global_quality 18 ${aCmd} ${sCmd} -map 0 ${outputPath}`;
+
+    suggestedFfmpegCommand = `# Guaranteed High-Quality CPU Transcode (Visually Transparent CRF 18):
+${cpuCmd}
+
+# Note: If using Intel GPU QSV, grant render group access first: sudo usermod -aG render,video $USER
+# Intel QSV GPU Command:
+# ${qsvCmd}`;
   }
 
   const summary = needsTranscode
