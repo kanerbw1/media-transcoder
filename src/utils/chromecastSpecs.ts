@@ -167,8 +167,11 @@ export function analyzeMediaForChromecast(
     // Remux only (Lightning fast!)
     suggestedFfmpegCommand = `# Audio Transcode (Audibly transparent E-AC-3 @ 768k / AC-3 @ 640k):\nffmpeg -i ${inputPath} -c:v copy ${aCmd} ${sCmd} -map 0 ${outputPath}`;
   } else if (videoNeedsReencode) {
-    // Single best hardware-accelerated FFmpeg command for Intel i7-7700T / HD Graphics 630 iGPU (Visually Transparent HEVC @ QP 18)
-    suggestedFfmpegCommand = `ffmpeg -vaapi_device /dev/dri/renderD128 -i ${inputPath} -vf 'format=nv12,hwupload' -c:v hevc_vaapi -qp 18 ${aCmd} ${sCmd} -map 0 ${outputPath}`;
+    // Primary Intel QuickSync (QSV / libvpl) hardware encoding + High Quality CPU Fallback
+    const qsvCmd = `ffmpeg -hwaccel qsv -i ${inputPath} -c:v hevc_qsv -preset medium -global_quality 18 ${aCmd} ${sCmd} -map 0 ${outputPath}`;
+    const cpuCmd = `ffmpeg -i ${inputPath} ${vCmd} ${aCmd} ${sCmd} -map 0 ${outputPath}`;
+    
+    suggestedFfmpegCommand = `# Primary: Intel QuickSync (QSV Hardware Acceleration for i7-7700T / HD 630):\n${qsvCmd}\n\n# Fallback: High-Quality CPU Transcode (if GPU access permissions are restricted):\n${cpuCmd}`;
   }
 
   const summary = needsTranscode
