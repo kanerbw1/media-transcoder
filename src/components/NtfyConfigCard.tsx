@@ -18,7 +18,7 @@ export const NtfyConfigCard: React.FC<NtfyConfigCardProps> = ({
   const [serverUrl, setServerUrl] = useState(ntfy.serverUrl || 'http://homelab:100/');
   const [topic, setTopic] = useState(ntfy.topic || 'jellyfin-transcode');
   const [priority, setPriority] = useState(ntfy.priority || 'high');
-  const [tagsInput, setTagsInput] = useState(ntfy.tags ? ntfy.tags.join(', ') : 'clapper, warning, tv');
+  const [tagsInput, setTagsInput] = useState(ntfy.tags ? ntfy.tags.join(', ') : '');
   const [authToken, setAuthToken] = useState(ntfy.authToken || '');
   const [includeFfmpegCommand, setIncludeFfmpegCommand] = useState(ntfy.includeFfmpegCommand ?? true);
 

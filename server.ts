@@ -19,7 +19,7 @@ let appConfig: AppConfig = {
     serverUrl: process.env.NTFY_URL || 'http://homelab:100/',
     topic: process.env.NTFY_TOPIC || 'jellyfin-transcode',
     priority: 'high',
-    tags: ['clapper', 'warning', 'tv'],
+    tags: [],
     notifyOnlyOnTranscodeNeeded: true,
     includeFfmpegCommand: true,
   },
@@ -66,22 +66,22 @@ async function dispatchNtfyNotification(item: MediaItem, customTopic?: string): 
   } else if (cleanTitle.toLowerCase().startsWith('transcode alert:')) {
     cleanTitle = cleanTitle.replace(/^transcode alert:\s*/i, '');
   }
-  const title = `⚠️ Transcode Alert: ${cleanTitle}`;
+  const title = `Transcode Alert: ${cleanTitle}`;
   const sizeGB = (item.fileSizeBytes / (1024 * 1024 * 1024)).toFixed(2);
 
-  let body = `**📁 File:** \`${item.fileName}\`\n`;
-  body += `**💾 Size:** ${sizeGB} GB\n`;
-  body += `**📍 Path:** \`${item.filePath}\`\n\n`;
+  let body = `**File:** \`${item.fileName}\`\n`;
+  body += `**Size:** ${sizeGB} GB\n`;
+  body += `**Path:** \`${item.filePath}\`\n\n`;
 
   if (item.transcodeReasons && item.transcodeReasons.length > 0) {
-    body += `**⚠️ Transcode Issues:**\n`;
+    body += `**Transcode Issues:**\n`;
     body += item.transcodeReasons.map((r) => `• ${r}`).join('\n') + '\n\n';
   }
 
   if (item.recommendation) {
-    body += `**💡 Recommendation:**\n${item.recommendation.summary}\n`;
+    body += `**Recommendation:**\n${item.recommendation.summary}\n`;
     if (ntfy.includeFfmpegCommand && item.recommendation.suggestedFfmpegCommand) {
-      body += `\n**🛠️ Suggested FFmpeg Command:**\n\`\`\`bash\n${item.recommendation.suggestedFfmpegCommand}\n\`\`\``;
+      body += `\n**Suggested FFmpeg Command:**\n\`\`\`bash\n${item.recommendation.suggestedFfmpegCommand}\n\`\`\``;
     }
   }
 
@@ -105,7 +105,7 @@ async function dispatchNtfyNotification(item: MediaItem, customTopic?: string): 
       urgent: 5,
     };
     const priorityValue = priorityMap[ntfy.priority || 'high'] || 4;
-    const tagsList = ntfy.tags && ntfy.tags.length > 0 ? ntfy.tags : ['clapper', 'warning', 'tv'];
+    const tagsList = ntfy.tags || [];
 
     // Standard ntfy JSON publishing requires POSTing to the ROOT server URL (e.g. http://homelab:100/)
     let jsonServerUrl = baseUrl;

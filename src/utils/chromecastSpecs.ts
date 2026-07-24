@@ -126,13 +126,15 @@ export function analyzeMediaForChromecast(
 
   if (videoNeedsReencode) {
     targetVideoCodec = 'libx265';
-    vCmd = '-c:v libx265 -preset medium -crf 20 -pix_fmt yuv420p10le -tag:v hvc1';
+    // Visually transparent lossy video encoding (CRF 18 + 10-bit HEVC color depth)
+    vCmd = '-c:v libx265 -preset slow -crf 18 -pix_fmt yuv420p10le -tag:v hvc1';
     estimatedSpeed = 'Normal (Full encode)';
   }
 
   if (audioNeedsReencode) {
-    targetAudioCodec = 'ac3';
-    aCmd = '-c:a ac3 -b:a 640k';
+    targetAudioCodec = 'eac3';
+    // Audibly transparent lossy audio encoding (E-AC-3 768k or AC-3 640k for multi-channel)
+    aCmd = '-c:a eac3 -b:a 768k';
     if (estimatedSpeed === 'Ultra Fast (Remux only)') {
       estimatedSpeed = 'Fast (Audio transcode only)';
     }
@@ -155,10 +157,10 @@ export function analyzeMediaForChromecast(
     suggestedFfmpegCommand = `# Step 1: Strip image subtitles causing burn-in & remux stream\nffmpeg -i ${inputPath} ${vCmd} ${aCmd} -sn ${outputPath}\n\n# Optional: Extract subtitle track to external SRT sidecar if text-based:\nffmpeg -i ${inputPath} -map 0:s:0 "${dirName}/${nameWithoutExt}.en.srt"`;
   } else if (!videoNeedsReencode && audioNeedsReencode) {
     // Remux only (Lightning fast!)
-    suggestedFfmpegCommand = `# Ultra Fast Audio Convert (No video re-encoding needed!)\nffmpeg -i ${inputPath} -c:v copy ${aCmd} ${sCmd} -map 0 ${outputPath}`;
+    suggestedFfmpegCommand = `# Audio Transcode (Audibly transparent E-AC-3 @ 768k / AC-3 @ 640k):\nffmpeg -i ${inputPath} -c:v copy ${aCmd} ${sCmd} -map 0 ${outputPath}`;
   } else if (videoNeedsReencode) {
     // Hardware accelerated suggestion if on Linux NVENC / VAAPI
-    suggestedFfmpegCommand = `# Standard CPU HEVC Transcode for Chromecast 4K:\nffmpeg -i ${inputPath} ${vCmd} ${aCmd} ${sCmd} -map 0 ${outputPath}\n\n# Or if your Ubuntu machine has Intel VA-API GPU hardware acceleration:\nffmpeg -vaapi_device /dev/dri/renderD128 -i ${inputPath} -vf 'format=nv12,hwupload' -c:v hevc_vaapi -qp 22 ${aCmd} ${outputPath}`;
+    suggestedFfmpegCommand = `# High-Quality CPU HEVC Transcode (Visually Transparent CRF 18):\nffmpeg -i ${inputPath} ${vCmd} ${aCmd} ${sCmd} -map 0 ${outputPath}\n\n# Or Intel VA-API GPU Hardware Acceleration (Visually Transparent QP 18):\nffmpeg -vaapi_device /dev/dri/renderD128 -i ${inputPath} -vf 'format=nv12,hwupload' -c:v hevc_vaapi -qp 18 ${aCmd} ${outputPath}\n\n# Or NVIDIA NVENC GPU Acceleration (Visually Transparent CQ 18):\nffmpeg -i ${inputPath} -c:v hevc_nvenc -preset p6 -cq 18 -pix_fmt p010le ${aCmd} ${outputPath}`;
   }
 
   const summary = needsTranscode
