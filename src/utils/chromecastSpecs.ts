@@ -158,25 +158,71 @@ export function analyzeMediaForChromecast(
     : optPath;
 
   let suggestedFfmpegCommand = `ffmpeg -i ${inputPath} ${vCmd} ${aCmd} ${sCmd} -map 0 ${outputPath}`;
+  const commandOptions: { id: string; label: string; command: string; note?: string; recommended?: boolean }[] = [];
 
   if (subtitleNeedsExtraction && !videoNeedsReencode && !audioNeedsReencode) {
-    // If only bitmap subtitles are causing the issue, show command to extract SRT sidecar or strip image subs
     const step1Out = overwriteOriginal ? `${tempPath} && mv -f ${tempPath} ${finalDestPath}` : optPath;
-    suggestedFfmpegCommand = `# Step 1: Strip image subtitles causing burn-in & remux stream\nffmpeg -i ${inputPath} ${vCmd} ${aCmd} -sn ${step1Out}\n\n# Optional: Extract subtitle track to external SRT sidecar if text-based:\nffmpeg -i ${inputPath} -map 0:s:0 "${dirName}/${nameWithoutExt}.en.srt"`;
+    const stripCmd = `ffmpeg -i ${inputPath} ${vCmd} ${aCmd} -sn ${step1Out}`;
+    const srtCmd = `ffmpeg -i ${inputPath} -map 0:s:0 "${dirName}/${nameWithoutExt}.en.srt"`;
+
+    commandOptions.push({
+      id: 'strip-subs',
+      label: 'Option 1: Strip Image Subtitles & Fast Remux',
+      command: stripCmd,
+      note: 'Removes image/bitmap subtitles causing Jellyfin transcode burn-in.',
+      recommended: true,
+    });
+    commandOptions.push({
+      id: 'extract-srt',
+      label: 'Option 2: Extract Subtitle Track to External SRT Sidecar',
+      command: srtCmd,
+      note: 'Extracts text subtitle stream to a sidecar .srt file for direct playback.',
+    });
+    suggestedFfmpegCommand = stripCmd;
   } else if (!videoNeedsReencode && audioNeedsReencode) {
-    // Remux only (Lightning fast!)
-    suggestedFfmpegCommand = `# Audio Transcode (Audibly transparent E-AC-3 @ 768k / AC-3 @ 640k):\nffmpeg -i ${inputPath} -c:v copy ${aCmd} ${sCmd} -map 0 ${outputPath}`;
+    const remuxCmd = `ffmpeg -i ${inputPath} -c:v copy ${aCmd} ${sCmd} -map 0 ${outputPath}`;
+    commandOptions.push({
+      id: 'audio-transcode',
+      label: 'Audio Transcode & Remux (E-AC-3 @ 768k / AC-3 @ 640k)',
+      command: remuxCmd,
+      note: 'Fast audio conversion while keeping video stream bit-for-bit identical.',
+      recommended: true,
+    });
+    suggestedFfmpegCommand = remuxCmd;
   } else if (videoNeedsReencode) {
-    // Guaranteed CPU Transcode (Visually transparent CRF 18, works on any system without GPU permission errors)
     const cpuCmd = `ffmpeg -i ${inputPath} ${vCmd} ${aCmd} ${sCmd} -map 0 ${outputPath}`;
     const qsvCmd = `ffmpeg -init_hw_device qsv=hw -filter_hw_device hw -i ${inputPath} -c:v hevc_qsv -preset medium -global_quality 18 ${aCmd} ${sCmd} -map 0 ${outputPath}`;
+    const vaapiCmd = `ffmpeg -vaapi_device /dev/dri/renderD128 -i ${inputPath} -vf 'format=nv12,hwupload' -c:v hevc_vaapi -qp 18 ${aCmd} ${sCmd} -map 0 ${outputPath}`;
 
-    suggestedFfmpegCommand = `# Guaranteed High-Quality CPU Transcode (Visually Transparent CRF 18):
-${cpuCmd}
-
-# Note: If using Intel GPU QSV, grant render group access first: sudo usermod -aG render,video $USER
-# Intel QSV GPU Command:
-# ${qsvCmd}`;
+    commandOptions.push({
+      id: 'cpu-transcode',
+      label: 'Option 1: Guaranteed CPU Transcode (CRF 18 - x265 10-bit)',
+      command: cpuCmd,
+      note: 'Universal CPU transcode. Works on all machines without requiring GPU render device permissions.',
+      recommended: true,
+    });
+    commandOptions.push({
+      id: 'qsv-transcode',
+      label: 'Option 2: Intel QSV Hardware Acceleration (i7-7700T / HD 630 iGPU)',
+      command: qsvCmd,
+      note: 'Fast Intel QuickSync hardware encoding. Note: User must be in render group (`sudo usermod -aG render,video $USER`).',
+    });
+    commandOptions.push({
+      id: 'vaapi-transcode',
+      label: 'Option 3: Intel VA-API Hardware Acceleration (/dev/dri/renderD128)',
+      command: vaapiCmd,
+      note: 'Direct VA-API hardware encoder for Linux kernel render node.',
+    });
+    suggestedFfmpegCommand = cpuCmd;
+  } else {
+    const defaultCmd = `ffmpeg -i ${inputPath} ${vCmd} ${aCmd} ${sCmd} -map 0 ${outputPath}`;
+    commandOptions.push({
+      id: 'default-cmd',
+      label: 'FFmpeg Command',
+      command: defaultCmd,
+      recommended: true,
+    });
+    suggestedFfmpegCommand = defaultCmd;
   }
 
   const summary = needsTranscode
@@ -197,6 +243,7 @@ ${cpuCmd}
       targetAudioCodec,
       targetSubtitleAction,
       suggestedFfmpegCommand,
+      commandOptions,
       estimatedSpeed,
       hardwareAccelOption: 'Intel QSV / VA-API (i7-7700T / HD 630)',
     },

@@ -547,61 +547,90 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({
 
                                   {item.recommendation && (() => {
                                     const isOverwrite = !!overwriteMap[item.id];
-                                    const activeCmd = analyzeMediaForChromecast(item, undefined, isOverwrite).recommendation.suggestedFfmpegCommand;
+                                    const analysis = analyzeMediaForChromecast(item, undefined, isOverwrite);
+                                    const options = analysis.recommendation.commandOptions && analysis.recommendation.commandOptions.length > 0
+                                      ? analysis.recommendation.commandOptions
+                                      : [{ id: 'cmd-0', label: 'FFmpeg Command', command: analysis.recommendation.suggestedFfmpegCommand }];
 
                                     return (
-                                      <div className="mt-2 pt-2 border-t border-amber-500/20">
-                                        <div className="flex flex-wrap items-center justify-between gap-2 mb-1.5">
+                                      <div className="mt-2 pt-2 border-t border-amber-500/20 space-y-2">
+                                        <div className="flex flex-wrap items-center justify-between gap-2">
                                           <span className="text-[11px] font-bold text-slate-200 flex items-center gap-1 font-mono uppercase">
                                             <Terminal className="w-3.5 h-3.5 text-indigo-400" />
-                                            FFmpeg Command ({item.recommendation.estimatedSpeed}):
+                                            FFmpeg Command Options ({item.recommendation.estimatedSpeed}):
                                           </span>
 
-                                          <div className="flex items-center gap-2">
-                                            <label
-                                              title="Toggle between saving as .optimized file vs overwriting original file"
-                                              className="inline-flex items-center gap-1.5 text-[10px] font-medium text-slate-300 hover:text-white cursor-pointer select-none bg-slate-900/90 px-2 py-0.5 rounded border border-slate-700/80"
-                                            >
-                                              <input
-                                                type="checkbox"
-                                                checked={isOverwrite}
-                                                onChange={(e) =>
-                                                  setOverwriteMap((prev) => ({
-                                                    ...prev,
-                                                    [item.id]: e.target.checked,
-                                                  }))
-                                                }
-                                                className="w-3 h-3 rounded border-slate-700 bg-slate-950 text-indigo-500 focus:ring-indigo-500 cursor-pointer"
-                                              />
-                                              <span>Overwrite original</span>
-                                            </label>
-
-                                            <button
-                                              onClick={() => handleCopyCommand(activeCmd, item.id)}
-                                              className="inline-flex items-center px-2 py-0.5 text-[10px] font-semibold bg-slate-800 hover:bg-slate-700 text-indigo-300 border border-slate-700 rounded transition cursor-pointer font-mono"
-                                            >
-                                              {copiedId === item.id ? (
-                                                <>
-                                                  <Check className="w-3 h-3 mr-1 text-emerald-400" />
-                                                  Copied!
-                                                </>
-                                              ) : (
-                                                <>
-                                                  <Copy className="w-3 h-3 mr-1" />
-                                                  Copy Command
-                                                </>
-                                              )}
-                                            </button>
-                                          </div>
+                                          <label
+                                            title="Toggle between saving as .optimized file vs overwriting original file"
+                                            className="inline-flex items-center gap-1.5 text-[10px] font-medium text-slate-300 hover:text-white cursor-pointer select-none bg-slate-900/90 px-2 py-0.5 rounded border border-slate-700/80"
+                                          >
+                                            <input
+                                              type="checkbox"
+                                              checked={isOverwrite}
+                                              onChange={(e) =>
+                                                setOverwriteMap((prev) => ({
+                                                  ...prev,
+                                                  [item.id]: e.target.checked,
+                                                }))
+                                              }
+                                              className="w-3 h-3 rounded border-slate-700 bg-slate-950 text-indigo-500 focus:ring-indigo-500 cursor-pointer"
+                                            />
+                                            <span>Overwrite original</span>
+                                          </label>
                                         </div>
 
-                                        <pre
-                                          onClick={() => handleCopyCommand(activeCmd, item.id)}
-                                          title="Click to copy command"
-                                          className="p-2.5 bg-slate-950 hover:bg-slate-900/80 text-emerald-400 font-mono text-[10px] rounded overflow-x-auto border border-slate-800 leading-relaxed cursor-pointer select-all transition"
-                                        >
-                                          {activeCmd}
-                                        </pre>
+                                        <div className="space-y-2">
+                                          {options.map((opt, optIdx) => {
+                                            const copyKey = `${item.id}-${opt.id || optIdx}`;
+                                            return (
+                                              <div key={opt.id || optIdx} className="bg-slate-950 border border-slate-800 rounded p-2.5 space-y-1.5">
+                                                <div className="flex items-center justify-between gap-2">
+                                                  <div className="flex items-center gap-1.5 min-w-0">
+                                                    <span className="text-[11px] font-bold text-slate-200 font-mono truncate">
+                                                      {opt.label}
+                                                    </span>
+                                                    {opt.recommended && (
+                                                      <span className="px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 rounded font-mono shrink-0">
+                                                        Recommended
+                                                      </span>
+                                                    )}
+                                                  </div>
+
+                                                  <button
+                                                    onClick={() => handleCopyCommand(opt.command, copyKey)}
+                                                    className="inline-flex items-center px-2 py-0.5 text-[10px] font-semibold bg-slate-800 hover:bg-slate-700 text-indigo-300 border border-slate-700 rounded transition cursor-pointer font-mono shrink-0"
+                                                  >
+                                                    {copiedId === copyKey ? (
+                                                      <>
+                                                        <Check className="w-3 h-3 mr-1 text-emerald-400" />
+                                                        Copied!
+                                                      </>
+                                                    ) : (
+                                                      <>
+                                                        <Copy className="w-3 h-3 mr-1" />
+                                                        Copy Command
+                                                      </>
+                                                    )}
+                                                  </button>
+                                                </div>
+
+                                                {opt.note && (
+                                                  <p className="text-[10px] text-slate-400 leading-tight font-sans">
+                                                    {opt.note}
+                                                  </p>
+                                                )}
+
+                                                <pre
+                                                  onClick={() => handleCopyCommand(opt.command, copyKey)}
+                                                  title="Click to copy command"
+                                                  className="p-2 bg-slate-900/90 hover:bg-slate-900 text-emerald-400 font-mono text-[10px] rounded overflow-x-auto border border-slate-800 leading-relaxed cursor-pointer select-all transition"
+                                                >
+                                                  {opt.command}
+                                                </pre>
+                                              </div>
+                                            );
+                                          })}
+                                        </div>
                                       </div>
                                     );
                                   })()}
@@ -800,61 +829,90 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({
                         {/* Suggested FFmpeg Bash Command */}
                         {item.recommendation && (() => {
                           const isOverwrite = !!overwriteMap[item.id];
-                          const activeCmd = analyzeMediaForChromecast(item, undefined, isOverwrite).recommendation.suggestedFfmpegCommand;
+                          const analysis = analyzeMediaForChromecast(item, undefined, isOverwrite);
+                          const options = analysis.recommendation.commandOptions && analysis.recommendation.commandOptions.length > 0
+                            ? analysis.recommendation.commandOptions
+                            : [{ id: 'cmd-0', label: 'FFmpeg Command', command: analysis.recommendation.suggestedFfmpegCommand }];
 
                           return (
-                            <div className="mt-3 pt-3 border-t border-amber-500/20">
-                              <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                            <div className="mt-3 pt-3 border-t border-amber-500/20 space-y-2.5">
+                              <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
                                 <span className="text-xs font-bold text-slate-200 flex items-center gap-1.5 font-mono uppercase">
                                   <Terminal className="w-3.5 h-3.5 text-indigo-400" />
-                                  FFmpeg Bash Command ({item.recommendation.estimatedSpeed}):
+                                  FFmpeg Command Options ({item.recommendation.estimatedSpeed}):
                                 </span>
 
-                                <div className="flex items-center gap-3">
-                                  <label
-                                    title="Toggle between saving as .optimized file vs overwriting original file"
-                                    className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-300 hover:text-white cursor-pointer select-none bg-slate-900 px-2.5 py-1 rounded border border-slate-700/80"
-                                  >
-                                    <input
-                                      type="checkbox"
-                                      checked={isOverwrite}
-                                      onChange={(e) =>
-                                        setOverwriteMap((prev) => ({
-                                          ...prev,
-                                          [item.id]: e.target.checked,
-                                        }))
-                                      }
-                                      className="w-3.5 h-3.5 rounded border-slate-700 bg-slate-950 text-indigo-500 focus:ring-indigo-500 cursor-pointer"
-                                    />
-                                    <span>Overwrite original file</span>
-                                  </label>
-
-                                  <button
-                                    onClick={() => handleCopyCommand(activeCmd, item.id)}
-                                    className="inline-flex items-center px-2.5 py-1 text-[11px] font-semibold bg-slate-800 hover:bg-slate-700 text-indigo-300 border border-slate-700 rounded transition cursor-pointer font-mono"
-                                  >
-                                    {copiedId === item.id ? (
-                                      <>
-                                        <Check className="w-3.5 h-3.5 mr-1 text-emerald-400" />
-                                        Copied!
-                                      </>
-                                    ) : (
-                                      <>
-                                        <Copy className="w-3.5 h-3.5 mr-1" />
-                                        Copy FFmpeg Command
-                                      </>
-                                    )}
-                                  </button>
-                                </div>
+                                <label
+                                  title="Toggle between saving as .optimized file vs overwriting original file"
+                                  className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-300 hover:text-white cursor-pointer select-none bg-slate-900 px-2.5 py-1 rounded border border-slate-700/80"
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={isOverwrite}
+                                    onChange={(e) =>
+                                      setOverwriteMap((prev) => ({
+                                        ...prev,
+                                        [item.id]: e.target.checked,
+                                      }))
+                                    }
+                                    className="w-3.5 h-3.5 rounded border-slate-700 bg-slate-950 text-indigo-500 focus:ring-indigo-500 cursor-pointer"
+                                  />
+                                  <span>Overwrite original file</span>
+                                </label>
                               </div>
 
-                              <pre
-                                onClick={() => handleCopyCommand(activeCmd, item.id)}
-                                title="Click to copy command"
-                                className="p-3 bg-slate-950 hover:bg-slate-900/80 text-emerald-400 font-mono text-[11px] rounded overflow-x-auto border border-slate-800 shadow-inner leading-relaxed cursor-pointer select-all transition"
-                              >
-                                {activeCmd}
-                              </pre>
+                              <div className="space-y-2.5">
+                                {options.map((opt, optIdx) => {
+                                  const copyKey = `${item.id}-${opt.id || optIdx}`;
+                                  return (
+                                    <div key={opt.id || optIdx} className="bg-slate-950 border border-slate-800 rounded-lg p-3 space-y-2 shadow-inner">
+                                      <div className="flex items-center justify-between gap-2">
+                                        <div className="flex items-center gap-2 min-w-0">
+                                          <span className="text-xs font-bold text-slate-200 font-mono truncate">
+                                            {opt.label}
+                                          </span>
+                                          {opt.recommended && (
+                                            <span className="px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 rounded font-mono shrink-0">
+                                              Recommended
+                                            </span>
+                                          )}
+                                        </div>
+
+                                        <button
+                                          onClick={() => handleCopyCommand(opt.command, copyKey)}
+                                          className="inline-flex items-center px-2.5 py-1 text-[11px] font-semibold bg-slate-800 hover:bg-slate-700 text-indigo-300 border border-slate-700 rounded transition cursor-pointer font-mono shrink-0"
+                                        >
+                                          {copiedId === copyKey ? (
+                                            <>
+                                              <Check className="w-3.5 h-3.5 mr-1 text-emerald-400" />
+                                              Copied!
+                                            </>
+                                          ) : (
+                                            <>
+                                              <Copy className="w-3.5 h-3.5 mr-1" />
+                                              Copy Command
+                                            </>
+                                          )}
+                                        </button>
+                                      </div>
+
+                                      {opt.note && (
+                                        <p className="text-xs text-slate-400 leading-snug font-sans">
+                                          {opt.note}
+                                        </p>
+                                      )}
+
+                                      <pre
+                                        onClick={() => handleCopyCommand(opt.command, copyKey)}
+                                        title="Click to copy command"
+                                        className="p-3 bg-slate-900/90 hover:bg-slate-900 text-emerald-400 font-mono text-[11px] rounded overflow-x-auto border border-slate-800 shadow-inner leading-relaxed cursor-pointer select-all transition"
+                                      >
+                                        {opt.command}
+                                      </pre>
+                                    </div>
+                                  );
+                                })}
+                              </div>
                             </div>
                           );
                         })()}

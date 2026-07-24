@@ -43,6 +43,14 @@ export interface MediaItem {
   recommendation?: TranscodeRecommendation;
 }
 
+export interface FfmpegCommandOption {
+  id: string;
+  label: string;
+  command: string;
+  note?: string;
+  recommended?: boolean;
+}
+
 export interface TranscodeRecommendation {
   summary: string;
   targetContainer: 'mkv' | 'mp4';
@@ -50,6 +58,7 @@ export interface TranscodeRecommendation {
   targetAudioCodec: 'ac3' | 'aac' | 'eac3' | 'copy';
   targetSubtitleAction: 'extract_srt' | 'convert_vtt' | 'copy' | 'burn_in_not_recommended';
   suggestedFfmpegCommand: string;
+  commandOptions?: FfmpegCommandOption[];
   estimatedSpeed: 'Ultra Fast (Remux only)' | 'Fast (Audio transcode only)' | 'Normal (Full encode)';
   hardwareAccelOption?: string; // e.g. nvenc, vaapi, qsv
 }
