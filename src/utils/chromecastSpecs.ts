@@ -159,8 +159,15 @@ export function analyzeMediaForChromecast(
     // Remux only (Lightning fast!)
     suggestedFfmpegCommand = `# Audio Transcode (Audibly transparent E-AC-3 @ 768k / AC-3 @ 640k):\nffmpeg -i ${inputPath} -c:v copy ${aCmd} ${sCmd} -map 0 ${outputPath}`;
   } else if (videoNeedsReencode) {
-    // Hardware accelerated suggestion if on Linux NVENC / VAAPI
-    suggestedFfmpegCommand = `# High-Quality CPU HEVC Transcode (Visually Transparent CRF 18):\nffmpeg -i ${inputPath} ${vCmd} ${aCmd} ${sCmd} -map 0 ${outputPath}\n\n# Or Intel VA-API GPU Hardware Acceleration (Visually Transparent QP 18):\nffmpeg -vaapi_device /dev/dri/renderD128 -i ${inputPath} -vf 'format=nv12,hwupload' -c:v hevc_vaapi -qp 18 ${aCmd} ${outputPath}\n\n# Or NVIDIA NVENC GPU Acceleration (Visually Transparent CQ 18):\nffmpeg -i ${inputPath} -c:v hevc_nvenc -preset p6 -cq 18 -pix_fmt p010le ${aCmd} ${outputPath}`;
+    // Tailored hardware-accelerated FFmpeg commands for Intel Core i7-7700T with Intel HD Graphics 630 iGPU (VA-API / QuickSync)
+    suggestedFfmpegCommand = `# Option 1: Intel QSV Hardware Acceleration (Intel i7-7700T / HD 630 - Visually Transparent):
+ffmpeg -hwaccel qsv -i ${inputPath} -c:v hevc_qsv -preset slow -global_quality 18 -pix_fmt nv12 ${aCmd} ${sCmd} -map 0 ${outputPath}
+
+# Option 2: Intel VA-API Hardware Acceleration (/dev/dri/renderD128 - Visually Transparent):
+ffmpeg -vaapi_device /dev/dri/renderD128 -i ${inputPath} -vf 'format=nv12,hwupload' -c:v hevc_vaapi -qp 18 ${aCmd} ${sCmd} -map 0 ${outputPath}
+
+# Option 3: High-Quality Intel i7-7700T CPU Transcode (Slow Preset, CRF 18):
+ffmpeg -i ${inputPath} ${vCmd} ${aCmd} ${sCmd} -map 0 ${outputPath}`;
   }
 
   const summary = needsTranscode
@@ -182,7 +189,7 @@ export function analyzeMediaForChromecast(
       targetSubtitleAction,
       suggestedFfmpegCommand,
       estimatedSpeed,
-      hardwareAccelOption: 'vaapi / nvenc available',
+      hardwareAccelOption: 'Intel QSV / VA-API (i7-7700T / HD 630)',
     },
   };
 }
