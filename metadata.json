@@ -1,0 +1,6 @@
+{
+  "name": "Chromecast Transcode Notifier",
+  "description": "Monitors media directories for Jellyfin, analyzes video/audio codecs for Chromecast 4K direct play compatibility, recommends optimal ffmpeg commands, and dispatches ntfy alerts.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
