@@ -150,14 +150,19 @@ export function analyzeMediaForChromecast(
   // Construct shell command
   const inputPath = `"${rawPath}"`;
   const optPath = `"${dirName}/${nameWithoutExt}.optimized.${targetExt}"`;
-  const outputPath = overwriteOriginal ? inputPath : optPath;
-  const yFlag = overwriteOriginal ? '-y ' : '';
+  const tempPath = `"${dirName}/${nameWithoutExt}.tmp.${targetExt}"`;
 
-  let suggestedFfmpegCommand = `ffmpeg ${yFlag}-i ${inputPath} ${vCmd} ${aCmd} ${sCmd} -map 0 ${outputPath}`;
+  const outputPath = overwriteOriginal ? tempPath : optPath;
+  const yFlag = overwriteOriginal ? '-y ' : '';
+  const postProcess = overwriteOriginal ? ` && mv -f ${tempPath} ${inputPath}` : '';
+
+  const formatCmd = (cmdBody: string) => `${cmdBody}${postProcess}`;
+
+  let suggestedFfmpegCommand = formatCmd(`ffmpeg ${yFlag}-i ${inputPath} ${vCmd} ${aCmd} ${sCmd} -map 0 ${outputPath}`);
   const commandOptions: { id: string; label: string; command: string; note?: string; recommended?: boolean }[] = [];
 
   if (subtitleNeedsExtraction && !videoNeedsReencode && !audioNeedsReencode) {
-    const stripCmd = `ffmpeg ${yFlag}-i ${inputPath} ${vCmd} ${aCmd} -sn ${outputPath}`;
+    const stripCmd = formatCmd(`ffmpeg ${yFlag}-i ${inputPath} ${vCmd} ${aCmd} -sn ${outputPath}`);
     const srtCmd = `ffmpeg -i ${inputPath} -map 0:s:0 "${dirName}/${nameWithoutExt}.en.srt"`;
 
     commandOptions.push({
@@ -175,7 +180,7 @@ export function analyzeMediaForChromecast(
     });
     suggestedFfmpegCommand = stripCmd;
   } else if (!videoNeedsReencode && audioNeedsReencode) {
-    const remuxCmd = `ffmpeg ${yFlag}-i ${inputPath} -c:v copy ${aCmd} ${sCmd} -map 0 ${outputPath}`;
+    const remuxCmd = formatCmd(`ffmpeg ${yFlag}-i ${inputPath} -c:v copy ${aCmd} ${sCmd} -map 0 ${outputPath}`);
     commandOptions.push({
       id: 'audio-transcode',
       label: 'Audio Transcode & Remux (E-AC-3 @ 768k / AC-3 @ 640k)',
@@ -185,9 +190,9 @@ export function analyzeMediaForChromecast(
     });
     suggestedFfmpegCommand = remuxCmd;
   } else if (videoNeedsReencode) {
-    const cpuCmd = `ffmpeg ${yFlag}-i ${inputPath} ${vCmd} ${aCmd} ${sCmd} -map 0 ${outputPath}`;
-    const qsvCmd = `ffmpeg ${yFlag}-init_hw_device qsv=hw -filter_hw_device hw -i ${inputPath} -c:v hevc_qsv -preset medium -global_quality 18 ${aCmd} ${sCmd} -map 0 ${outputPath}`;
-    const vaapiCmd = `ffmpeg ${yFlag}-vaapi_device /dev/dri/renderD128 -i ${inputPath} -vf 'format=nv12,hwupload' -c:v hevc_vaapi -qp 18 ${aCmd} ${sCmd} -map 0 ${outputPath}`;
+    const cpuCmd = formatCmd(`ffmpeg ${yFlag}-i ${inputPath} ${vCmd} ${aCmd} ${sCmd} -map 0 ${outputPath}`);
+    const qsvCmd = formatCmd(`ffmpeg ${yFlag}-init_hw_device qsv=hw -filter_hw_device hw -i ${inputPath} -c:v hevc_qsv -preset medium -global_quality 18 ${aCmd} ${sCmd} -map 0 ${outputPath}`);
+    const vaapiCmd = formatCmd(`ffmpeg ${yFlag}-vaapi_device /dev/dri/renderD128 -i ${inputPath} -vf 'format=nv12,hwupload' -c:v hevc_vaapi -qp 18 ${aCmd} ${sCmd} -map 0 ${outputPath}`);
 
     commandOptions.push({
       id: 'cpu-transcode',
@@ -210,7 +215,7 @@ export function analyzeMediaForChromecast(
     });
     suggestedFfmpegCommand = cpuCmd;
   } else {
-    const defaultCmd = `ffmpeg ${yFlag}-i ${inputPath} ${vCmd} ${aCmd} ${sCmd} -map 0 ${outputPath}`;
+    const defaultCmd = formatCmd(`ffmpeg ${yFlag}-i ${inputPath} ${vCmd} ${aCmd} ${sCmd} -map 0 ${outputPath}`);
     commandOptions.push({
       id: 'default-cmd',
       label: 'FFmpeg Command',
