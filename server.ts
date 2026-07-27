@@ -3,7 +3,7 @@ import path from 'path';
 import fs from 'fs';
 import { exec } from 'child_process';
 import { createServer as createViteServer } from 'vite';
-import { AppConfig, MediaItem, NotificationLog, SystemInfo } from './src/types';
+import { AppConfig, MediaItem, NotificationLog, SystemInfo, StreamInfo } from './src/types';
 import { analyzeMediaForChromecast, DEFAULT_CHROMECAST_PROFILE } from './src/utils/chromecastSpecs';
 import { getProcessedInitialMedia } from './src/utils/mockMediaGenerator';
 
@@ -12,6 +12,58 @@ const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
 
 app.use(express.json());
+
+// Helper function to execute ffprobe on actual media files
+function probeMediaFile(filePath: string): Promise<{ durationSeconds?: number; streams: StreamInfo[] } | null> {
+  return new Promise((resolve) => {
+    const safePath = filePath.replace(/"/g, '\\"');
+    const cmd = `ffprobe -v quiet -print_format json -show_format -show_streams "${safePath}"`;
+
+    exec(cmd, { maxBuffer: 10 * 1024 * 1024 }, (err, stdout) => {
+      if (err || !stdout) {
+        return resolve(null);
+      }
+      try {
+        const parsed = JSON.parse(stdout);
+        if (!parsed.streams || !Array.isArray(parsed.streams)) {
+          return resolve(null);
+        }
+
+        const streams: StreamInfo[] = parsed.streams.map((s: any, idx: number) => {
+          const codecType = (s.codec_type || '').toLowerCase();
+          const codecName = (s.codec_name || '').toLowerCase();
+          const codecLong = s.codec_long_name || '';
+          const pixelFormat = s.pix_fmt || '';
+          const profile = s.profile || '';
+          const bitDepth = s.bits_per_raw_sample ? parseInt(s.bits_per_raw_sample, 10) : (pixelFormat.includes('10') ? 10 : 8);
+          const channels = s.channels;
+
+          return {
+            index: s.index ?? idx,
+            type: (codecType === 'video' || codecType === 'audio' || codecType === 'subtitle') ? codecType : 'other',
+            codec: codecName,
+            codecLong,
+            profile,
+            pixelFormat,
+            bitDepth,
+            width: s.width,
+            height: s.height,
+            channels,
+            language: s.tags?.language || s.tags?.LANGUAGE,
+            title: s.tags?.title || s.tags?.TITLE,
+            isDefault: Boolean(s.disposition?.default),
+          };
+        }).filter((s) => s.type === 'video' || s.type === 'audio' || s.type === 'subtitle');
+
+        const durationSeconds = parsed.format?.duration ? Math.round(parseFloat(parsed.format.duration)) : undefined;
+
+        return resolve({ durationSeconds, streams });
+      } catch {
+        return resolve(null);
+      }
+    });
+  });
+}
 
 // Default Application State
 const DEFAULT_APP_CONFIG: AppConfig = {
@@ -366,23 +418,23 @@ app.post('/api/scan', async (req: Request, res: Response) => {
           const stat = fs.statSync(filePath);
           const ext = path.extname(fileName).replace('.', '').toLowerCase();
 
-          // Infer basic metadata from filename if ffprobe is not installed
           const title = fileName.replace(/\.[^/.]+$/, '').replace(/[._]/g, ' ');
           const isTv = /S\d{2}E\d{2}/i.test(fileName) || dir.mediaType === 'tv';
 
-          const inferredItem: Partial<MediaItem> = {
-            id: `file-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-            fileName,
-            filePath,
-            directory: dir.path,
-            title,
-            mediaType: isTv ? 'tv' : 'movie',
-            fileSizeBytes: stat.size,
-            durationSeconds: 5400,
-            container: ext,
-            addedAt: stat.birthtime.toISOString(),
-            lastScannedAt: new Date().toISOString(),
-            streams: [
+          // Probe actual media file using ffprobe
+          const probed = await probeMediaFile(filePath);
+
+          let streams: StreamInfo[] = [];
+          let durationSeconds = 5400;
+
+          if (probed && probed.streams && probed.streams.length > 0) {
+            streams = probed.streams;
+            if (probed.durationSeconds) {
+              durationSeconds = probed.durationSeconds;
+            }
+          } else {
+            // Fallback if ffprobe is not installed or fails
+            streams = [
               {
                 index: 0,
                 type: 'video',
@@ -398,7 +450,25 @@ app.post('/api/scan', async (req: Request, res: Response) => {
                 codec: fileName.toLowerCase().includes('dts') ? 'dts' : (fileName.toLowerCase().includes('truehd') ? 'truehd' : 'ac3'),
                 channels: 6,
               },
-            ],
+            ];
+          }
+
+          const existingItem = mediaDatabase.find((m) => m.filePath === filePath);
+          const itemId = existingItem ? existingItem.id : `file-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+
+          const inferredItem: Partial<MediaItem> = {
+            id: itemId,
+            fileName,
+            filePath,
+            directory: dir.path,
+            title,
+            mediaType: isTv ? 'tv' : 'movie',
+            fileSizeBytes: stat.size,
+            durationSeconds,
+            container: ext,
+            addedAt: existingItem ? existingItem.addedAt : stat.birthtime.toISOString(),
+            lastScannedAt: new Date().toISOString(),
+            streams,
           };
 
           const analysis = analyzeMediaForChromecast(inferredItem, appConfig.chromecastProfile);
