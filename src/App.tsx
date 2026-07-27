@@ -144,7 +144,7 @@ export default function App() {
       />
 
       {/* Main Screen Content */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <main className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-8 pb-28 md:pb-12 flex-1">
         {activeTab === 'media' && (
           <MediaLibraryView
             mediaItems={mediaItems}
@@ -187,7 +187,7 @@ export default function App() {
       />
 
       {/* Footer */}
-      <footer className="border-t border-slate-900 bg-slate-950 py-6 text-center text-xs text-slate-500">
+      <footer className="border-t border-slate-900 bg-slate-950 py-6 pb-24 md:pb-6 text-center text-xs text-slate-500">
         <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
           <div>
             Chromecast 4K Transcode Inspector for Jellyfin • Ubuntu 26.04 Homelab

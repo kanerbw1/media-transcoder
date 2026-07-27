@@ -385,46 +385,46 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({
   return (
     <div className="space-y-6 relative pb-28">
       {/* Top Controls & Metrics */}
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-slate-900/90 p-5 rounded-lg border border-slate-800 shadow-xl">
-        <div className="flex flex-wrap items-center gap-3">
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3.5 bg-slate-900/90 p-3.5 sm:p-5 rounded-xl border border-slate-800 shadow-xl">
+        <div className="flex flex-wrap items-center gap-2 sm:gap-3">
           <div className="flex items-center space-x-2">
-            <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Scanned Media:</span>
-            <span className="text-base font-bold text-white font-mono">{mediaItems.length}</span>
+            <span className="text-[11px] sm:text-xs font-semibold text-slate-400 uppercase tracking-wider">Scanned Media:</span>
+            <span className="text-sm sm:text-base font-bold text-white font-mono">{mediaItems.length}</span>
           </div>
           <span className="text-slate-800">•</span>
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs px-2.5 py-1 rounded bg-slate-800 text-slate-300 border border-slate-700 font-bold font-mono">
+          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+            <span className="text-[10px] sm:text-xs px-2 sm:px-2.5 py-1 rounded bg-slate-800 text-slate-300 border border-slate-700 font-bold font-mono">
               🎬 {movieCount} Movies
             </span>
-            <span className="text-xs px-2.5 py-1 rounded bg-indigo-500/10 text-indigo-300 border border-indigo-500/30 font-bold font-mono">
-              📺 {tvShowGroups.length} TV Shows ({tvEpisodeCount} Episodes)
+            <span className="text-[10px] sm:text-xs px-2 sm:px-2.5 py-1 rounded bg-indigo-500/10 text-indigo-300 border border-indigo-500/30 font-bold font-mono">
+              📺 {tvShowGroups.length} TV Shows ({tvEpisodeCount} Eps)
             </span>
-            <span className="text-xs px-2.5 py-1 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20 font-bold font-mono">
-              {needsTranscodeCount} TRANSCODE NEEDED
+            <span className="text-[10px] sm:text-xs px-2 sm:px-2.5 py-1 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20 font-bold font-mono">
+              {needsTranscodeCount} TRANSCODE
             </span>
-            <span className="text-xs px-2.5 py-1 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-bold font-mono">
+            <span className="text-[10px] sm:text-xs px-2 sm:px-2.5 py-1 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-bold font-mono">
               {directPlayCount} DIRECT PLAY
             </span>
           </div>
         </div>
 
         {/* Search & Filter */}
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="relative min-w-[220px]">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 w-full lg:w-auto">
+          <div className="relative w-full sm:w-60">
             <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
             <input
               type="text"
               placeholder="Search title, show, codec..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-800 focus:border-indigo-500 text-slate-200 text-xs rounded pl-9 pr-3 py-2 outline-none font-mono"
+              className="w-full bg-slate-950 border border-slate-800 focus:border-indigo-500 text-slate-200 text-xs rounded-lg pl-9 pr-3 py-2 outline-none font-mono min-h-[38px]"
             />
           </div>
 
-          <div className="flex items-center space-x-1 bg-slate-950 p-1 rounded border border-slate-800 font-mono text-xs overflow-x-auto">
+          <div className="flex items-center space-x-1 bg-slate-950 p-1 rounded-lg border border-slate-800 font-mono text-xs overflow-x-auto no-scrollbar scrollbar-none py-1">
             <button
               onClick={() => setFilterType('all')}
-              className={`px-3 py-1 rounded font-semibold transition cursor-pointer ${
+              className={`px-3 py-1.5 rounded font-semibold transition cursor-pointer whitespace-nowrap min-h-[34px] ${
                 filterType === 'all' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'
               }`}
             >
@@ -432,7 +432,7 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({
             </button>
             <button
               onClick={() => setFilterType('movies')}
-              className={`px-3 py-1 rounded font-semibold transition cursor-pointer ${
+              className={`px-3 py-1.5 rounded font-semibold transition cursor-pointer whitespace-nowrap min-h-[34px] ${
                 filterType === 'movies' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'
               }`}
             >
@@ -440,7 +440,7 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({
             </button>
             <button
               onClick={() => setFilterType('tv')}
-              className={`px-3 py-1 rounded font-semibold transition cursor-pointer ${
+              className={`px-3 py-1.5 rounded font-semibold transition cursor-pointer whitespace-nowrap min-h-[34px] ${
                 filterType === 'tv' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'
               }`}
             >
@@ -448,7 +448,7 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({
             </button>
             <button
               onClick={() => setFilterType('needs_transcode')}
-              className={`px-3 py-1 rounded font-semibold transition cursor-pointer ${
+              className={`px-3 py-1.5 rounded font-semibold transition cursor-pointer whitespace-nowrap min-h-[34px] ${
                 filterType === 'needs_transcode' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'
               }`}
             >
@@ -456,7 +456,7 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({
             </button>
             <button
               onClick={() => setFilterType('direct_play')}
-              className={`px-3 py-1 rounded font-semibold transition cursor-pointer ${
+              className={`px-3 py-1.5 rounded font-semibold transition cursor-pointer whitespace-nowrap min-h-[34px] ${
                 filterType === 'direct_play' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'
               }`}
             >
@@ -1613,8 +1613,8 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({
 
       {/* Floating Bottom Batch Bar */}
       {selectedCount > 0 && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 w-full max-w-4xl px-4 animate-in fade-in slide-in-from-bottom-4 duration-200">
-          <div className="bg-slate-950/95 backdrop-blur-md border border-indigo-500/50 p-4 rounded-xl shadow-2xl shadow-indigo-950/80 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="fixed bottom-20 sm:bottom-6 left-1/2 -translate-x-1/2 z-40 w-full max-w-4xl px-3 animate-in fade-in slide-in-from-bottom-4 duration-200">
+          <div className="bg-slate-950/95 backdrop-blur-md border border-indigo-500/50 p-3.5 sm:p-4 rounded-xl shadow-2xl shadow-indigo-950/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div className="flex items-center space-x-3">
               <div className="p-2.5 rounded-lg bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 shrink-0">
                 <ListChecks className="w-5 h-5" />

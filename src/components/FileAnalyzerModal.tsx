@@ -85,27 +85,27 @@ export const FileAnalyzerModal: React.FC<FileAnalyzerModalProps> = ({ isOpen, on
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
-      <div className="bg-slate-900 border border-slate-800 rounded-lg w-full max-w-2xl shadow-2xl text-slate-100 overflow-hidden flex flex-col max-h-[90vh]">
+    <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-end sm:items-center justify-center p-0 sm:p-4">
+      <div className="bg-slate-900 border border-slate-800 rounded-t-2xl sm:rounded-2xl w-full max-w-2xl shadow-2xl text-slate-100 overflow-hidden flex flex-col max-h-[94vh] sm:max-h-[90vh]">
         
         {/* Header */}
-        <div className="p-4 border-b border-slate-800 flex items-center justify-between bg-slate-950/80">
+        <div className="p-4 border-b border-slate-800 flex items-center justify-between bg-slate-950/80 shrink-0">
           <div className="flex items-center space-x-2">
-            <div className="w-7 h-7 bg-indigo-600 rounded flex items-center justify-center font-mono text-xs font-bold text-white">
+            <div className="w-7 h-7 bg-indigo-600 rounded flex items-center justify-center font-mono text-xs font-bold text-white shrink-0">
               FF
             </div>
-            <h3 className="text-sm font-bold text-white uppercase tracking-wider">Chromecast 4K Codec Inspector</h3>
+            <h3 className="text-xs sm:text-sm font-bold text-white uppercase tracking-wider truncate">Chromecast 4K Codec Inspector</h3>
           </div>
           <button
             onClick={onClose}
-            className="p-1 text-slate-400 hover:text-white rounded hover:bg-slate-800 transition cursor-pointer"
+            className="p-1 text-slate-400 hover:text-white rounded hover:bg-slate-800 transition cursor-pointer min-h-[36px] min-w-[36px] flex items-center justify-center"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
         {/* Form Body */}
-        <div className="p-6 overflow-y-auto space-y-5">
+        <div className="p-4 sm:p-6 overflow-y-auto space-y-4 sm:space-y-5">
           
           {/* File Drag / Selector */}
           <div className="border border-dashed border-slate-700 hover:border-indigo-500 bg-slate-950/60 rounded p-4 text-center cursor-pointer transition relative">

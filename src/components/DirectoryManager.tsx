@@ -178,20 +178,20 @@ export const DirectoryManager: React.FC<DirectoryManagerProps> = ({
             </div>
           )}
 
-          <div className="flex items-center justify-between pt-2">
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-2">
             <label className="flex items-center space-x-2 text-xs text-slate-300 cursor-pointer font-mono">
               <input
                 type="checkbox"
                 checked={recursive}
                 onChange={(e) => setRecursive(e.target.checked)}
-                className="rounded border-slate-700 bg-slate-900 text-indigo-500 focus:ring-indigo-500"
+                className="rounded border-slate-700 bg-slate-900 text-indigo-500 focus:ring-indigo-500 w-4 h-4"
               />
-              <span>Scan subfolders recursively (Season folders & subdirectories)</span>
+              <span>Scan subfolders recursively (Season folders)</span>
             </label>
 
             <button
               type="submit"
-              className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs rounded shadow transition cursor-pointer flex items-center gap-1.5 font-mono uppercase tracking-wider"
+              className="px-4 py-2 sm:py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs rounded shadow transition cursor-pointer flex items-center justify-center gap-1.5 font-mono uppercase tracking-wider min-h-[38px] sm:min-h-0"
             >
               <FolderPlus className="w-4 h-4" />
               Add Directory

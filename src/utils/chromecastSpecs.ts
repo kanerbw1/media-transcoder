@@ -489,7 +489,7 @@ export function analyzeMediaForChromecast(
 
     if (hasBitmapSubs) {
       // Bitmap subtitles (PGS, SUP, VobSub) cannot be directly exported to .srt by FFmpeg without OCR
-      const supCmd = `ffmpeg -fflags +genpts -i ${inputPath} -map 0:s:0 -c:s copy "${dirName}/${nameWithoutExt}.en.sup"`;
+      const supCmd = `ffmpeg -y -fflags +genpts -i ${inputPath} -map 0:s:0 -c:s copy "${dirName}/${nameWithoutExt}.en.sup"`;
       const remuxPlusSupCmd = `${supCmd} && ${stripCmd}`;
 
       commandOptions.push({
@@ -521,7 +521,7 @@ export function analyzeMediaForChromecast(
       suggestedFfmpegCommand = remuxPlusSupCmd;
     } else {
       // Text subtitles (ASS, SSA, SRT, VTT) can be safely extracted directly to .srt
-      const srtCmd = `ffmpeg -fflags +genpts -i ${inputPath} -map 0:s:0 "${dirName}/${nameWithoutExt}.en.srt"`;
+      const srtCmd = `ffmpeg -y -fflags +genpts -i ${inputPath} -map 0:s:0 "${dirName}/${nameWithoutExt}.en.srt"`;
       const remuxPlusSrtCmd = `${srtCmd} && ${stripCmd}`;
 
       commandOptions.push({
