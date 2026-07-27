@@ -51,56 +51,57 @@ export function isEnglishStream(stream: StreamInfo): boolean {
 
 export function buildFfmpegMapFlags(
   item: Partial<MediaItem>,
-  englishOnly: boolean
+  selectedStreamIndices?: number[]
 ): { mapFlags: string; truncatedAudioCount: number; truncatedSubCount: number } {
   const streams = item.streams || [];
-  if (!englishOnly) {
+  if (!selectedStreamIndices) {
     return { mapFlags: '-map 0', truncatedAudioCount: 0, truncatedSubCount: 0 };
   }
 
+  const selectedSet = new Set(selectedStreamIndices);
   const videoStreams = streams.filter((s) => s.type === 'video');
   const audioStreams = streams.filter((s) => s.type === 'audio');
   const subStreams = streams.filter((s) => s.type === 'subtitle');
 
-  const engAudio = audioStreams.filter((s) => isEnglishStream(s));
-  const nonEngAudio = audioStreams.filter((s) => !isEnglishStream(s));
-
-  const engSub = subStreams.filter((s) => isEnglishStream(s));
-  const nonEngSub = subStreams.filter((s) => !isEnglishStream(s));
-
-  if (streams.length === 0) {
-    return {
-      mapFlags: '-map 0:v -map 0:a:m:language:eng? -map 0:a:m:language:en? -map 0:a:0? -map 0:s:m:language:eng? -map 0:s:m:language:en?',
-      truncatedAudioCount: 0,
-      truncatedSubCount: 0,
-    };
-  }
+  const unselectedAudio = audioStreams.filter((s) => !selectedSet.has(s.index));
+  const unselectedSub = subStreams.filter((s) => !selectedSet.has(s.index));
 
   const mapParts: string[] = [];
 
   // Video
   if (videoStreams.length > 0) {
-    mapParts.push('-map 0:v');
+    let videoMapped = false;
+    videoStreams.forEach((v) => {
+      if (selectedSet.has(v.index)) {
+        mapParts.push(`-map 0:${v.index}`);
+        videoMapped = true;
+      }
+    });
+    if (!videoMapped) {
+      mapParts.push('-map 0:v');
+    }
   } else {
-    mapParts.push('-map 0:0');
+    mapParts.push('-map 0:v');
   }
 
   // Audio
-  if (engAudio.length > 0) {
-    engAudio.forEach((a) => mapParts.push(`-map 0:${a.index}`));
-  } else if (audioStreams.length > 0) {
-    mapParts.push(`-map 0:${audioStreams[0].index}`);
-  }
+  audioStreams.forEach((a) => {
+    if (selectedSet.has(a.index)) {
+      mapParts.push(`-map 0:${a.index}`);
+    }
+  });
 
   // Subtitles
-  if (engSub.length > 0) {
-    engSub.forEach((s) => mapParts.push(`-map 0:${s.index}`));
-  }
+  subStreams.forEach((s) => {
+    if (selectedSet.has(s.index)) {
+      mapParts.push(`-map 0:${s.index}`);
+    }
+  });
 
   return {
-    mapFlags: mapParts.join(' '),
-    truncatedAudioCount: nonEngAudio.length,
-    truncatedSubCount: nonEngSub.length,
+    mapFlags: mapParts.length > 0 ? mapParts.join(' ') : '-map 0',
+    truncatedAudioCount: unselectedAudio.length,
+    truncatedSubCount: unselectedSub.length,
   };
 }
 
@@ -108,7 +109,7 @@ export function analyzeMediaForChromecast(
   item: Partial<MediaItem>,
   profile: ChromecastProfile = DEFAULT_CHROMECAST_PROFILE,
   overwriteOriginal: boolean = false,
-  englishOnly: boolean = false
+  selectedStreamIndices?: number[]
 ): AnalysisResult {
   const reasons: string[] = [];
   const streams = item.streams || [];
@@ -228,7 +229,7 @@ export function analyzeMediaForChromecast(
     sCmd = '-c:s copy';
   }
 
-  const { mapFlags, truncatedAudioCount, truncatedSubCount } = buildFfmpegMapFlags(item, englishOnly);
+  const { mapFlags, truncatedAudioCount, truncatedSubCount } = buildFfmpegMapFlags(item, selectedStreamIndices);
 
   // Construct shell command
   const inputPath = `"${rawPath}"`;
@@ -241,10 +242,8 @@ export function analyzeMediaForChromecast(
 
   const formatCmd = (cmdBody: string) => `${cmdBody}${postProcess}`;
 
-  const langNote = englishOnly
-    ? truncatedAudioCount > 0 || truncatedSubCount > 0
-      ? `Truncating ${truncatedAudioCount} non-English audio track(s) & ${truncatedSubCount} non-English subtitle track(s).`
-      : 'Mapping English audio & subtitle streams only.'
+  const langNote = (truncatedAudioCount > 0 || truncatedSubCount > 0)
+    ? `Truncating ${truncatedAudioCount} unselected audio track(s) & ${truncatedSubCount} unselected subtitle track(s).`
     : undefined;
 
   let suggestedFfmpegCommand = formatCmd(`ffmpeg ${yFlag}-fflags +genpts -i ${inputPath} ${vCmd} ${aCmd} ${sCmd} ${mapFlags} ${outputPath}`);
@@ -352,7 +351,7 @@ export function generateBatchShowCommands(
   episodes: MediaItem[],
   profile: ChromecastProfile = DEFAULT_CHROMECAST_PROFILE,
   overwriteOriginal: boolean = false,
-  englishOnly: boolean = false
+  selectedStreamIndices?: number[]
 ): {
   showDir: string;
   needsTranscodeCount: number;
@@ -383,7 +382,7 @@ export function generateBatchShowCommands(
   let transcodeCount = 0;
 
   episodes.forEach((ep) => {
-    const analysis = analyzeMediaForChromecast(ep, profile, overwriteOriginal, englishOnly);
+    const analysis = analyzeMediaForChromecast(ep, profile, overwriteOriginal, selectedStreamIndices);
     if (analysis.needsTranscode) {
       transcodeCount++;
     }
@@ -425,13 +424,17 @@ export function generateBatchShowCommands(
   const aCmd = audioNeedsReencode ? '-c:a eac3 -b:a 768k' : '-c:a copy';
   const sCmd = subtitleNeedsExtraction ? '-c:s copy' : '-c:s copy';
 
-  const mapFlags = englishOnly
-    ? '-map 0:v -map 0:a:m:language:eng? -map 0:a:m:language:en? -map 0:a:0? -map 0:s:m:language:eng? -map 0:s:m:language:en?'
-    : '-map 0';
+  let mapFlags = '-map 0';
+  let langSuffixNote = '';
 
-  const langSuffixNote = englishOnly
-    ? ' Truncates non-English audio & subtitle streams (retains English tracks).'
-    : '';
+  if (selectedStreamIndices && selectedStreamIndices.length > 0) {
+    const mapParts = ['-map 0:v'];
+    selectedStreamIndices.forEach((idx) => {
+      mapParts.push(`-map 0:${idx}`);
+    });
+    mapFlags = mapParts.join(' ');
+    langSuffixNote = ` Maps selected streams (indices ${selectedStreamIndices.join(', ')}), truncating unselected tracks.`;
+  }
 
   const yFlag = overwriteOriginal ? '-y ' : '';
   const escapedDir = `"${showDir}"`;

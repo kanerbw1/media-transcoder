@@ -20,8 +20,8 @@ import {
   Folder,
   RotateCw,
 } from 'lucide-react';
-import { MediaItem } from '../types';
-import { analyzeMediaForChromecast, generateBatchShowCommands, isEnglishStream } from '../utils/chromecastSpecs';
+import { MediaItem, StreamInfo } from '../types';
+import { analyzeMediaForChromecast, generateBatchShowCommands } from '../utils/chromecastSpecs';
 
 interface MediaLibraryViewProps {
   mediaItems: MediaItem[];
@@ -74,7 +74,49 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({
   const [rescanningId, setRescanningId] = useState<string | null>(null);
   const [expandedShows, setExpandedShows] = useState<Record<string, boolean>>({});
   const [overwriteMap, setOverwriteMap] = useState<Record<string, boolean>>({});
-  const [englishOnlyMap, setEnglishOnlyMap] = useState<Record<string, boolean>>({});
+  const [selectedStreamsMap, setSelectedStreamsMap] = useState<Record<string, number[]>>({});
+
+  const getSelectedIndices = (id: string, streams?: StreamInfo[]): number[] => {
+    if (selectedStreamsMap[id] !== undefined) {
+      return selectedStreamsMap[id];
+    }
+    return (streams || []).map((s) => s.index);
+  };
+
+  const isStreamSelected = (id: string, streamIndex: number, streams?: StreamInfo[]): boolean => {
+    const selected = getSelectedIndices(id, streams);
+    return selected.includes(streamIndex);
+  };
+
+  const toggleStreamSelection = (id: string, streamIndex: number, streams?: StreamInfo[]) => {
+    const current = getSelectedIndices(id, streams);
+    let updated: number[];
+    if (current.includes(streamIndex)) {
+      updated = current.filter((i) => i !== streamIndex);
+    } else {
+      updated = [...current, streamIndex].sort((a, b) => a - b);
+    }
+    setSelectedStreamsMap((prev) => ({
+      ...prev,
+      [id]: updated,
+    }));
+  };
+
+  const setTypeStreamsSelected = (id: string, streams: StreamInfo[] | undefined, type: 'audio' | 'subtitle', keep: boolean) => {
+    const allStreams = streams || [];
+    const current = new Set(getSelectedIndices(id, allStreams));
+    allStreams.filter((s) => s.type === type).forEach((s) => {
+      if (keep) {
+        current.add(s.index);
+      } else {
+        current.delete(s.index);
+      }
+    });
+    setSelectedStreamsMap((prev) => ({
+      ...prev,
+      [id]: Array.from(current).sort((a, b) => a - b),
+    }));
+  };
 
   const handleRescanClick = async (itemId: string) => {
     if (!onRescanItem) return;
@@ -369,10 +411,19 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({
                       {/* Show-Wide Batch FFmpeg Commands */}
                       {(() => {
                         const showOverwriteKey = `show-${group.showName}`;
-                        const showEnglishKey = `show-eng-${group.showName}`;
                         const isShowOverwrite = !!overwriteMap[showOverwriteKey];
-                        const isShowEnglishOnly = !!englishOnlyMap[showEnglishKey];
-                        const batchInfo = generateBatchShowCommands(group.episodes, undefined, isShowOverwrite, isShowEnglishOnly);
+
+                        const showStreamsMap = new Map<number, StreamInfo>();
+                        group.episodes.forEach((ep) => {
+                          (ep.streams || []).forEach((s) => {
+                            if (!showStreamsMap.has(s.index)) {
+                              showStreamsMap.set(s.index, s);
+                            }
+                          });
+                        });
+                        const showStreams = Array.from(showStreamsMap.values()).sort((a, b) => a.index - b.index);
+                        const showSelectedIndices = getSelectedIndices(showOverwriteKey, showStreams);
+                        const batchInfo = generateBatchShowCommands(group.episodes, undefined, isShowOverwrite, showSelectedIndices);
 
                         if (batchInfo.batchOptions.length === 0) return null;
 
@@ -387,24 +438,6 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({
                               </div>
 
                               <div className="flex flex-wrap items-center gap-2">
-                                <label
-                                  title="Toggle keeping English audio & subtitle tracks only (stripping non-English tracks)"
-                                  className="inline-flex items-center gap-1.5 text-[10px] font-medium text-indigo-200 hover:text-white cursor-pointer select-none bg-indigo-950/80 px-2.5 py-1 rounded border border-indigo-700/80"
-                                >
-                                  <input
-                                    type="checkbox"
-                                    checked={isShowEnglishOnly}
-                                    onChange={(e) =>
-                                      setEnglishOnlyMap((prev) => ({
-                                        ...prev,
-                                        [showEnglishKey]: e.target.checked,
-                                      }))
-                                    }
-                                    className="w-3 h-3 rounded border-indigo-700 bg-slate-950 text-indigo-500 focus:ring-indigo-500 cursor-pointer"
-                                  />
-                                  <span>Keep English tracks only</span>
-                                </label>
-
                                 <label
                                   title="Toggle between saving as .optimized files vs overwriting original files in-place"
                                   className="inline-flex items-center gap-1.5 text-[10px] font-medium text-indigo-200 hover:text-white cursor-pointer select-none bg-indigo-950/80 px-2.5 py-1 rounded border border-indigo-700/80"
@@ -424,6 +457,64 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({
                                 </label>
                               </div>
                             </div>
+
+                            {/* Stream Selectors for Show Batch */}
+                            {showStreams.filter((s) => s.type !== 'video').length > 0 && (
+                              <div className="bg-slate-950/80 border border-indigo-900/60 rounded p-2.5 space-y-2 font-mono text-[11px]">
+                                <div className="flex items-center justify-between">
+                                  <div className="text-[10px] uppercase font-bold text-indigo-300 tracking-wider">
+                                    Select Audio & Subtitle Streams to Keep Across Show:
+                                  </div>
+                                  <div className="flex items-center gap-2 text-[9px]">
+                                    <button
+                                      onClick={() => {
+                                        showStreams.forEach((s) => {
+                                          if (s.type !== 'video' && !isStreamSelected(showOverwriteKey, s.index, showStreams)) {
+                                            toggleStreamSelection(showOverwriteKey, s.index, showStreams);
+                                          }
+                                        });
+                                      }}
+                                      className="text-indigo-400 hover:text-indigo-300 underline cursor-pointer"
+                                    >
+                                      Keep All
+                                    </button>
+                                  </div>
+                                </div>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                                  {showStreams.filter((s) => s.type !== 'video').map((stream) => {
+                                    const isSelected = isStreamSelected(showOverwriteKey, stream.index, showStreams);
+                                    const langLabel = stream.language ? stream.language.toUpperCase() : 'UND';
+                                    return (
+                                      <label
+                                        key={stream.index}
+                                        className={`flex items-center justify-between p-1.5 rounded border cursor-pointer select-none transition ${
+                                          isSelected
+                                            ? 'bg-indigo-950/60 border-indigo-700/70 text-indigo-100'
+                                            : 'bg-slate-900/50 border-slate-800 text-slate-500 opacity-60'
+                                        }`}
+                                      >
+                                        <div className="flex items-center gap-2 min-w-0 truncate">
+                                          <input
+                                            type="checkbox"
+                                            checked={isSelected}
+                                            onChange={() => toggleStreamSelection(showOverwriteKey, stream.index, showStreams)}
+                                            className="w-3.5 h-3.5 rounded border-indigo-700 bg-slate-950 text-indigo-500 focus:ring-indigo-500 cursor-pointer shrink-0"
+                                          />
+                                          <span className="truncate">
+                                            <span className="text-slate-400 font-bold">#{stream.index + 1} </span>
+                                            <span className="uppercase font-bold">{stream.type}: {stream.codec}</span>
+                                            {stream.title && <span className="text-slate-300 ml-1">("{stream.title}")</span>}
+                                          </span>
+                                        </div>
+                                        <span className="px-1.5 py-0.2 text-[9px] rounded font-bold uppercase bg-slate-900 border border-slate-700 ml-1 shrink-0">
+                                          {langLabel}
+                                        </span>
+                                      </label>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            )}
 
                             <p className="text-[11px] text-slate-300 font-mono">
                               Directory Path:{' '}
@@ -626,41 +717,80 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({
 
                                 {/* Audio Streams */}
                                 <div className="p-2.5 bg-slate-900 border border-slate-800 rounded text-xs space-y-1">
-                                  <div className="flex items-center space-x-1.5 font-semibold text-slate-300 mb-1">
-                                    <Music className="w-3.5 h-3.5 text-emerald-400" />
-                                    <span className="uppercase text-[10px] tracking-wider text-slate-400">
-                                      Audio Tracks ({audioStreams.length})
-                                    </span>
+                                  <div className="flex items-center justify-between font-semibold text-slate-300 mb-1">
+                                    <div className="flex items-center space-x-1.5">
+                                      <Music className="w-3.5 h-3.5 text-emerald-400" />
+                                      <span className="uppercase text-[10px] tracking-wider text-slate-400">
+                                        Audio Tracks ({audioStreams.length})
+                                      </span>
+                                    </div>
+                                    {audioStreams.length > 0 && (
+                                      <div className="flex items-center gap-1.5 text-[9px] font-mono">
+                                        <button
+                                          onClick={() => setTypeStreamsSelected(item.id, item.streams, 'audio', true)}
+                                          className="text-indigo-400 hover:text-indigo-300 underline cursor-pointer"
+                                        >
+                                          Keep All
+                                        </button>
+                                        <span className="text-slate-600">•</span>
+                                        <button
+                                          onClick={() => setTypeStreamsSelected(item.id, item.streams, 'audio', false)}
+                                          className="text-slate-400 hover:text-slate-300 underline cursor-pointer"
+                                        >
+                                          Truncate All
+                                        </button>
+                                      </div>
+                                    )}
                                   </div>
                                   {audioStreams.length > 0 ? (
                                     <div className="font-mono text-slate-300 space-y-1 text-[11px]">
-                                      {audioStreams.map((audio, idx) => {
-                                        const isEng = isEnglishStream(audio);
-                                        const isItemEngOnly = !!englishOnlyMap[`eng-${item.id}`];
-                                        const isTruncated = isItemEngOnly && !isEng;
+                                      {audioStreams.map((audio) => {
+                                        const isSelected = isStreamSelected(item.id, audio.index, item.streams);
                                         const langLabel = audio.language ? audio.language.toUpperCase() : 'UND';
 
                                         return (
                                           <div
-                                            key={idx}
-                                            className={`border-b border-slate-800/60 pb-1 last:border-0 flex items-center justify-between gap-1 ${
-                                              isTruncated ? 'opacity-40 line-through' : ''
+                                            key={audio.index}
+                                            className={`p-1.5 rounded border transition flex items-center justify-between gap-1.5 ${
+                                              isSelected
+                                                ? 'bg-slate-950/80 border-slate-700/80 text-slate-200'
+                                                : 'bg-slate-950/40 border-red-900/30 text-slate-500 opacity-60'
                                             }`}
                                           >
-                                            <div className="min-w-0 truncate">
-                                              <span className="text-slate-500">#{idx + 1}: </span>
-                                              <strong className="text-white uppercase font-bold">{audio.codec}</strong> ({audio.channels || 2}ch)
-                                              {audio.title && <span className="text-slate-400 text-[10px] ml-1">({audio.title})</span>}
+                                            <label className="flex items-center gap-2 cursor-pointer min-w-0 flex-1 select-none">
+                                              <input
+                                                type="checkbox"
+                                                checked={isSelected}
+                                                onChange={() => toggleStreamSelection(item.id, audio.index, item.streams)}
+                                                className="w-3.5 h-3.5 rounded border-slate-700 bg-slate-950 text-emerald-500 focus:ring-emerald-500 cursor-pointer shrink-0"
+                                              />
+                                              <div className="min-w-0 truncate flex-1">
+                                                <span className="text-slate-400 font-bold">#{audio.index + 1} </span>
+                                                <strong className={`uppercase font-bold ${isSelected ? 'text-white' : 'text-slate-500 line-through'}`}>
+                                                  {audio.codec}
+                                                </strong>{' '}
+                                                <span className="text-slate-300">({audio.channels || 2}ch)</span>
+                                                {audio.title && (
+                                                  <span className={`ml-1 text-[10px] ${isSelected ? 'text-indigo-300 font-medium' : 'text-slate-600 line-through'}`}>
+                                                    "{audio.title}"
+                                                  </span>
+                                                )}
+                                              </div>
+                                            </label>
+                                            <div className="flex items-center gap-1 shrink-0 font-mono">
+                                              <span className="px-1.5 py-0.2 rounded text-[9px] font-bold uppercase bg-slate-800 text-slate-400 border border-slate-700">
+                                                {langLabel}
+                                              </span>
+                                              <span
+                                                className={`px-1.5 py-0.2 rounded text-[9px] font-bold uppercase ${
+                                                  isSelected
+                                                    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                                                    : 'bg-red-500/20 text-red-400 border border-red-500/30 line-through'
+                                                }`}
+                                              >
+                                                {isSelected ? 'Keep' : 'Truncated'}
+                                              </span>
                                             </div>
-                                            <span
-                                              className={`px-1.5 py-0.2 rounded text-[9px] font-bold font-mono uppercase shrink-0 ${
-                                                isEng
-                                                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-                                                  : 'bg-slate-800 text-slate-400 border border-slate-700'
-                                              }`}
-                                            >
-                                              {langLabel} {isTruncated ? '• Truncated' : ''}
-                                            </span>
                                           </div>
                                         );
                                       })}
@@ -672,49 +802,87 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({
 
                                 {/* Subtitle Streams */}
                                 <div className="p-2.5 bg-slate-900 border border-slate-800 rounded text-xs space-y-1">
-                                  <div className="flex items-center space-x-1.5 font-semibold text-slate-300 mb-1">
-                                    <Subtitles className="w-3.5 h-3.5 text-amber-400" />
-                                    <span className="uppercase text-[10px] tracking-wider text-slate-400">
-                                      Subtitles ({subtitleStreams.length})
-                                    </span>
+                                  <div className="flex items-center justify-between font-semibold text-slate-300 mb-1">
+                                    <div className="flex items-center space-x-1.5">
+                                      <Subtitles className="w-3.5 h-3.5 text-amber-400" />
+                                      <span className="uppercase text-[10px] tracking-wider text-slate-400">
+                                        Subtitles ({subtitleStreams.length})
+                                      </span>
+                                    </div>
+                                    {subtitleStreams.length > 0 && (
+                                      <div className="flex items-center gap-1.5 text-[9px] font-mono">
+                                        <button
+                                          onClick={() => setTypeStreamsSelected(item.id, item.streams, 'subtitle', true)}
+                                          className="text-indigo-400 hover:text-indigo-300 underline cursor-pointer"
+                                        >
+                                          Keep All
+                                        </button>
+                                        <span className="text-slate-600">•</span>
+                                        <button
+                                          onClick={() => setTypeStreamsSelected(item.id, item.streams, 'subtitle', false)}
+                                          className="text-slate-400 hover:text-slate-300 underline cursor-pointer"
+                                        >
+                                          Truncate All
+                                        </button>
+                                      </div>
+                                    )}
                                   </div>
                                   {subtitleStreams.length > 0 ? (
                                     <div className="font-mono text-slate-300 space-y-1 text-[11px]">
-                                      {subtitleStreams.map((sub, idx) => {
-                                        const isEng = isEnglishStream(sub);
-                                        const isItemEngOnly = !!englishOnlyMap[`eng-${item.id}`];
-                                        const isTruncated = isItemEngOnly && !isEng;
+                                      {subtitleStreams.map((sub) => {
+                                        const isSelected = isStreamSelected(item.id, sub.index, item.streams);
                                         const langLabel = sub.language ? sub.language.toUpperCase() : 'UND';
 
                                         return (
                                           <div
-                                            key={idx}
-                                            className={`border-b border-slate-800/60 pb-1 last:border-0 flex items-center justify-between gap-1 ${
-                                              isTruncated ? 'opacity-40 line-through' : ''
+                                            key={sub.index}
+                                            className={`p-1.5 rounded border transition flex items-center justify-between gap-1.5 ${
+                                              isSelected
+                                                ? 'bg-slate-950/80 border-slate-700/80 text-slate-200'
+                                                : 'bg-slate-950/40 border-red-900/30 text-slate-500 opacity-60'
                                             }`}
                                           >
-                                            <div className="min-w-0 truncate">
-                                              <span className="text-slate-500">#{idx + 1}: </span>
-                                              <strong
-                                                className={
-                                                  sub.codec.includes('pgs') || sub.codec.includes('ass')
-                                                    ? 'text-amber-400 uppercase font-bold'
-                                                    : 'text-slate-200 uppercase'
-                                                }
+                                            <label className="flex items-center gap-2 cursor-pointer min-w-0 flex-1 select-none">
+                                              <input
+                                                type="checkbox"
+                                                checked={isSelected}
+                                                onChange={() => toggleStreamSelection(item.id, sub.index, item.streams)}
+                                                className="w-3.5 h-3.5 rounded border-slate-700 bg-slate-950 text-amber-500 focus:ring-amber-500 cursor-pointer shrink-0"
+                                              />
+                                              <div className="min-w-0 truncate flex-1">
+                                                <span className="text-slate-400 font-bold">#{sub.index + 1} </span>
+                                                <strong
+                                                  className={
+                                                    isSelected
+                                                      ? sub.codec.includes('pgs') || sub.codec.includes('ass')
+                                                        ? 'text-amber-400 uppercase font-bold'
+                                                        : 'text-slate-200 uppercase font-bold'
+                                                      : 'text-slate-500 uppercase line-through'
+                                                  }
+                                                >
+                                                  {sub.codec}
+                                                </strong>
+                                                {sub.title && (
+                                                  <span className={`ml-1 text-[10px] ${isSelected ? 'text-indigo-300 font-medium' : 'text-slate-600 line-through'}`}>
+                                                    "{sub.title}"
+                                                  </span>
+                                                )}
+                                              </div>
+                                            </label>
+                                            <div className="flex items-center gap-1 shrink-0 font-mono">
+                                              <span className="px-1.5 py-0.2 rounded text-[9px] font-bold uppercase bg-slate-800 text-slate-400 border border-slate-700">
+                                                {langLabel}
+                                              </span>
+                                              <span
+                                                className={`px-1.5 py-0.2 rounded text-[9px] font-bold uppercase ${
+                                                  isSelected
+                                                    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                                                    : 'bg-red-500/20 text-red-400 border border-red-500/30 line-through'
+                                                }`}
                                               >
-                                                {sub.codec}
-                                              </strong>
-                                              {sub.title && <span className="text-slate-400 text-[10px] ml-1">({sub.title})</span>}
+                                                {isSelected ? 'Keep' : 'Truncated'}
+                                              </span>
                                             </div>
-                                            <span
-                                              className={`px-1.5 py-0.2 rounded text-[9px] font-bold font-mono uppercase shrink-0 ${
-                                                isEng
-                                                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-                                                  : 'bg-slate-800 text-slate-400 border border-slate-700'
-                                              }`}
-                                            >
-                                              {langLabel} {isTruncated ? '• Truncated' : ''}
-                                            </span>
                                           </div>
                                         );
                                       })}
@@ -745,8 +913,8 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({
 
                                   {item.recommendation && (() => {
                                     const isOverwrite = !!overwriteMap[item.id];
-                                    const isEnglishOnly = !!englishOnlyMap[`eng-${item.id}`];
-                                    const analysis = analyzeMediaForChromecast(item, undefined, isOverwrite, isEnglishOnly);
+                                    const selectedIndices = getSelectedIndices(item.id, item.streams);
+                                    const analysis = analyzeMediaForChromecast(item, undefined, isOverwrite, selectedIndices);
                                     const options = analysis.recommendation.commandOptions && analysis.recommendation.commandOptions.length > 0
                                       ? analysis.recommendation.commandOptions
                                       : [{ id: 'cmd-0', label: 'FFmpeg Command', command: analysis.recommendation.suggestedFfmpegCommand }];
@@ -760,24 +928,6 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({
                                           </span>
 
                                           <div className="flex flex-wrap items-center gap-2">
-                                            <label
-                                              title="Toggle keeping English audio & subtitle tracks only (stripping non-English tracks)"
-                                              className="inline-flex items-center gap-1.5 text-[10px] font-medium text-slate-300 hover:text-white cursor-pointer select-none bg-slate-900/90 px-2 py-0.5 rounded border border-slate-700/80"
-                                            >
-                                              <input
-                                                type="checkbox"
-                                                checked={isEnglishOnly}
-                                                onChange={(e) =>
-                                                  setEnglishOnlyMap((prev) => ({
-                                                    ...prev,
-                                                    [`eng-${item.id}`]: e.target.checked,
-                                                  }))
-                                                }
-                                                className="w-3 h-3 rounded border-slate-700 bg-slate-950 text-indigo-500 focus:ring-indigo-500 cursor-pointer"
-                                              />
-                                              <span>Keep English tracks only</span>
-                                            </label>
-
                                             <label
                                               title="Toggle between saving as .optimized file vs overwriting original file"
                                               className="inline-flex items-center gap-1.5 text-[10px] font-medium text-slate-300 hover:text-white cursor-pointer select-none bg-slate-900/90 px-2 py-0.5 rounded border border-slate-700/80"
@@ -990,18 +1140,81 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({
 
                       {/* Audio Streams */}
                       <div className="p-3 bg-slate-900 border border-slate-800 rounded text-xs space-y-1">
-                        <div className="flex items-center space-x-1.5 font-semibold text-slate-300 mb-1">
-                          <Music className="w-4 h-4 text-emerald-400" />
-                          <span className="uppercase text-[11px] tracking-wider text-slate-400">Audio Tracks ({audioStreams.length})</span>
+                        <div className="flex items-center justify-between font-semibold text-slate-300 mb-1">
+                          <div className="flex items-center space-x-1.5">
+                            <Music className="w-4 h-4 text-emerald-400" />
+                            <span className="uppercase text-[11px] tracking-wider text-slate-400">Audio Tracks ({audioStreams.length})</span>
+                          </div>
+                          {audioStreams.length > 0 && (
+                            <div className="flex items-center gap-1.5 text-[10px] font-mono">
+                              <button
+                                onClick={() => setTypeStreamsSelected(item.id, item.streams, 'audio', true)}
+                                className="text-indigo-400 hover:text-indigo-300 underline cursor-pointer"
+                              >
+                                Keep All
+                              </button>
+                              <span className="text-slate-600">•</span>
+                              <button
+                                onClick={() => setTypeStreamsSelected(item.id, item.streams, 'audio', false)}
+                                className="text-slate-400 hover:text-slate-300 underline cursor-pointer"
+                              >
+                                Truncate All
+                              </button>
+                            </div>
+                          )}
                         </div>
                         {audioStreams.length > 0 ? (
                           <div className="font-mono text-slate-300 space-y-1 text-[11px]">
-                            {audioStreams.map((audio, idx) => (
-                              <div key={idx} className="border-b border-slate-800/60 pb-1 last:border-0">
-                                <span className="text-slate-500">#{idx + 1}: </span>
-                                <strong className="text-white uppercase font-bold">{audio.codec}</strong> ({audio.channels || 2}ch)
-                              </div>
-                            ))}
+                            {audioStreams.map((audio) => {
+                              const isSelected = isStreamSelected(item.id, audio.index, item.streams);
+                              const langLabel = audio.language ? audio.language.toUpperCase() : 'UND';
+
+                              return (
+                                <div
+                                  key={audio.index}
+                                  className={`p-1.5 rounded border transition flex items-center justify-between gap-2 ${
+                                    isSelected
+                                      ? 'bg-slate-950/80 border-slate-700/80 text-slate-200'
+                                      : 'bg-slate-950/40 border-red-900/30 text-slate-500 opacity-60'
+                                  }`}
+                                >
+                                  <label className="flex items-center gap-2 cursor-pointer min-w-0 flex-1 select-none">
+                                    <input
+                                      type="checkbox"
+                                      checked={isSelected}
+                                      onChange={() => toggleStreamSelection(item.id, audio.index, item.streams)}
+                                      className="w-3.5 h-3.5 rounded border-slate-700 bg-slate-950 text-emerald-500 focus:ring-emerald-500 cursor-pointer shrink-0"
+                                    />
+                                    <div className="min-w-0 truncate flex-1">
+                                      <span className="text-slate-400 font-bold">#{audio.index + 1} </span>
+                                      <strong className={`uppercase font-bold ${isSelected ? 'text-white' : 'text-slate-500 line-through'}`}>
+                                        {audio.codec}
+                                      </strong>{' '}
+                                      <span className="text-slate-300">({audio.channels || 2}ch)</span>
+                                      {audio.title && (
+                                        <span className={`ml-1 text-[10px] ${isSelected ? 'text-indigo-300 font-medium' : 'text-slate-600 line-through'}`}>
+                                          "{audio.title}"
+                                        </span>
+                                      )}
+                                    </div>
+                                  </label>
+                                  <div className="flex items-center gap-1 shrink-0 font-mono">
+                                    <span className="px-1.5 py-0.2 rounded text-[9px] font-bold uppercase bg-slate-800 text-slate-400 border border-slate-700">
+                                      {langLabel}
+                                    </span>
+                                    <span
+                                      className={`px-1.5 py-0.2 rounded text-[9px] font-bold uppercase ${
+                                        isSelected
+                                          ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                                          : 'bg-red-500/20 text-red-400 border border-red-500/30 line-through'
+                                      }`}
+                                    >
+                                      {isSelected ? 'Keep' : 'Truncated'}
+                                    </span>
+                                  </div>
+                                </div>
+                              );
+                            })}
                           </div>
                         ) : (
                           <div className="text-slate-500 italic font-mono">No audio stream</div>
@@ -1010,26 +1223,88 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({
 
                       {/* Subtitle Streams */}
                       <div className="p-3 bg-slate-900 border border-slate-800 rounded text-xs space-y-1">
-                        <div className="flex items-center space-x-1.5 font-semibold text-slate-300 mb-1">
-                          <Subtitles className="w-4 h-4 text-amber-400" />
-                          <span className="uppercase text-[11px] tracking-wider text-slate-400">Subtitles ({subtitleStreams.length})</span>
+                        <div className="flex items-center justify-between font-semibold text-slate-300 mb-1">
+                          <div className="flex items-center space-x-1.5">
+                            <Subtitles className="w-4 h-4 text-amber-400" />
+                            <span className="uppercase text-[11px] tracking-wider text-slate-400">Subtitles ({subtitleStreams.length})</span>
+                          </div>
+                          {subtitleStreams.length > 0 && (
+                            <div className="flex items-center gap-1.5 text-[10px] font-mono">
+                              <button
+                                onClick={() => setTypeStreamsSelected(item.id, item.streams, 'subtitle', true)}
+                                className="text-indigo-400 hover:text-indigo-300 underline cursor-pointer"
+                              >
+                                Keep All
+                              </button>
+                              <span className="text-slate-600">•</span>
+                              <button
+                                onClick={() => setTypeStreamsSelected(item.id, item.streams, 'subtitle', false)}
+                                className="text-slate-400 hover:text-slate-300 underline cursor-pointer"
+                              >
+                                Truncate All
+                              </button>
+                            </div>
+                          )}
                         </div>
                         {subtitleStreams.length > 0 ? (
                           <div className="font-mono text-slate-300 space-y-1 text-[11px]">
-                            {subtitleStreams.map((sub, idx) => (
-                              <div key={idx} className="border-b border-slate-800/60 pb-1 last:border-0">
-                                <span className="text-slate-500">#{idx + 1}: </span>
-                                <strong
-                                  className={
-                                    sub.codec.includes('pgs') || sub.codec.includes('ass')
-                                      ? 'text-amber-400 uppercase font-bold'
-                                      : 'text-slate-200 uppercase'
-                                  }
+                            {subtitleStreams.map((sub) => {
+                              const isSelected = isStreamSelected(item.id, sub.index, item.streams);
+                              const langLabel = sub.language ? sub.language.toUpperCase() : 'UND';
+
+                              return (
+                                <div
+                                  key={sub.index}
+                                  className={`p-1.5 rounded border transition flex items-center justify-between gap-2 ${
+                                    isSelected
+                                      ? 'bg-slate-950/80 border-slate-700/80 text-slate-200'
+                                      : 'bg-slate-950/40 border-red-900/30 text-slate-500 opacity-60'
+                                  }`}
                                 >
-                                  {sub.codec}
-                                </strong>
-                              </div>
-                            ))}
+                                  <label className="flex items-center gap-2 cursor-pointer min-w-0 flex-1 select-none">
+                                    <input
+                                      type="checkbox"
+                                      checked={isSelected}
+                                      onChange={() => toggleStreamSelection(item.id, sub.index, item.streams)}
+                                      className="w-3.5 h-3.5 rounded border-slate-700 bg-slate-950 text-amber-500 focus:ring-amber-500 cursor-pointer shrink-0"
+                                    />
+                                    <div className="min-w-0 truncate flex-1">
+                                      <span className="text-slate-400 font-bold">#{sub.index + 1} </span>
+                                      <strong
+                                        className={
+                                          isSelected
+                                            ? sub.codec.includes('pgs') || sub.codec.includes('ass')
+                                              ? 'text-amber-400 uppercase font-bold'
+                                              : 'text-slate-200 uppercase font-bold'
+                                            : 'text-slate-500 uppercase line-through'
+                                        }
+                                      >
+                                        {sub.codec}
+                                      </strong>
+                                      {sub.title && (
+                                        <span className={`ml-1 text-[10px] ${isSelected ? 'text-indigo-300 font-medium' : 'text-slate-600 line-through'}`}>
+                                          "{sub.title}"
+                                        </span>
+                                      )}
+                                    </div>
+                                  </label>
+                                  <div className="flex items-center gap-1 shrink-0 font-mono">
+                                    <span className="px-1.5 py-0.2 rounded text-[9px] font-bold uppercase bg-slate-800 text-slate-400 border border-slate-700">
+                                      {langLabel}
+                                    </span>
+                                    <span
+                                      className={`px-1.5 py-0.2 rounded text-[9px] font-bold uppercase ${
+                                        isSelected
+                                          ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                                          : 'bg-red-500/20 text-red-400 border border-red-500/30 line-through'
+                                      }`}
+                                    >
+                                      {isSelected ? 'Keep' : 'Truncated'}
+                                    </span>
+                                  </div>
+                                </div>
+                              );
+                            })}
                           </div>
                         ) : (
                           <div className="text-slate-500 italic font-mono">No embedded subtitles</div>
@@ -1058,7 +1333,8 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({
                         {/* Suggested FFmpeg Bash Command */}
                         {item.recommendation && (() => {
                           const isOverwrite = !!overwriteMap[item.id];
-                          const analysis = analyzeMediaForChromecast(item, undefined, isOverwrite);
+                          const selectedIndices = getSelectedIndices(item.id, item.streams);
+                          const analysis = analyzeMediaForChromecast(item, undefined, isOverwrite, selectedIndices);
                           const options = analysis.recommendation.commandOptions && analysis.recommendation.commandOptions.length > 0
                             ? analysis.recommendation.commandOptions
                             : [{ id: 'cmd-0', label: 'FFmpeg Command', command: analysis.recommendation.suggestedFfmpegCommand }];
