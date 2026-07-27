@@ -490,13 +490,13 @@ export function analyzeMediaForChromecast(
     if (hasBitmapSubs) {
       // Bitmap subtitles (PGS, SUP, VobSub) cannot be directly exported to .srt by FFmpeg without OCR
       const supCmd = `ffmpeg -fflags +genpts -i ${inputPath} -map 0:s:0 -c:s copy "${dirName}/${nameWithoutExt}.en.sup"`;
-      const remuxPlusSupCmd = `${keepCmd} && ffmpeg -fflags +genpts -y -i ${inputPath} -map 0:s:0 -c:s copy "${dirName}/${nameWithoutExt}.en.sup"`;
+      const remuxPlusSupCmd = `${supCmd} && ${stripCmd}`;
 
       commandOptions.push({
         id: 'remux-plus-sup',
         label: 'Option 1: Remux MKV & Save Subtitles as External .SUP Bitmap File',
         command: remuxPlusSupCmd,
-        note: 'Copies video and audio instantly while extracting the raw PGS bitmap subtitle track into a separate external .sup file. (Note: PGS subtitles are image graphics, so FFmpeg cannot convert them to text .srt without OCR software).',
+        note: 'Extracts the PGS subtitle track into an external .sup file FIRST, then remuxes the MKV with -sn to strip embedded PGS subtitles from the video file. Guarantees 100% Direct Play on Chromecast without video burn-in.',
         recommended: true,
       });
       commandOptions.push({
@@ -510,7 +510,7 @@ export function analyzeMediaForChromecast(
         id: 'keep-subs-remux',
         label: 'Option 3: Remux & Keep Subtitles (-c:s copy)',
         command: keepCmd,
-        note: langNote ? `${langNote} Preserves selected subtitle tracks.` : 'Preserves selected video, audio, and subtitle tracks inside MKV. (100% Direct Play when subtitles are OFF in Jellyfin; turning PGS subtitles ON will trigger transcode).',
+        note: langNote ? `${langNote} Preserves selected subtitle tracks.` : 'Preserves selected video, audio, and subtitle tracks inside MKV. (Note: Keeps PGS subtitles embedded in MKV. Turning PGS subtitles ON in Jellyfin will trigger transcode).',
       });
       commandOptions.push({
         id: 'extract-sup-only',
@@ -522,13 +522,13 @@ export function analyzeMediaForChromecast(
     } else {
       // Text subtitles (ASS, SSA, SRT, VTT) can be safely extracted directly to .srt
       const srtCmd = `ffmpeg -fflags +genpts -i ${inputPath} -map 0:s:0 "${dirName}/${nameWithoutExt}.en.srt"`;
-      const remuxPlusSrtCmd = `${keepCmd} && ffmpeg -fflags +genpts -y -i ${inputPath} -map 0:s:0 "${dirName}/${nameWithoutExt}.en.srt"`;
+      const remuxPlusSrtCmd = `${srtCmd} && ${stripCmd}`;
 
       commandOptions.push({
         id: 'remux-plus-srt',
         label: 'Option 1: Remux MKV & Save Subtitles as External .SRT File',
         command: remuxPlusSrtCmd,
-        note: 'Copies video and audio instantly while saving the text subtitle track into a separate external .srt file for direct playback on Chromecast without video burn-in.',
+        note: 'Extracts the text subtitle track into an external .srt file FIRST, then remuxes the MKV with -sn to strip embedded subtitles from the video file for 100% Direct Play on Chromecast without video burn-in.',
         recommended: true,
       });
       commandOptions.push({
