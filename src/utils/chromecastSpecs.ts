@@ -21,10 +21,94 @@ export interface AnalysisResult {
   recommendation: TranscodeRecommendation;
 }
 
+export function isEnglishStream(stream: StreamInfo): boolean {
+  if (!stream) return false;
+  const lang = (stream.language || '').toLowerCase().trim();
+  const title = (stream.title || '').toLowerCase().trim();
+
+  if (
+    lang === 'eng' ||
+    lang === 'en' ||
+    lang.startsWith('en-') ||
+    lang.startsWith('eng') ||
+    lang === 'english'
+  ) {
+    return true;
+  }
+  if (
+    title.includes('english') ||
+    /\beng\b/i.test(title) ||
+    /\ben\b/i.test(title)
+  ) {
+    return true;
+  }
+  // Fallback: If no language tag/title is present, treat as English / primary
+  if (!lang && !title) {
+    return true;
+  }
+  return false;
+}
+
+export function buildFfmpegMapFlags(
+  item: Partial<MediaItem>,
+  englishOnly: boolean
+): { mapFlags: string; truncatedAudioCount: number; truncatedSubCount: number } {
+  const streams = item.streams || [];
+  if (!englishOnly) {
+    return { mapFlags: '-map 0', truncatedAudioCount: 0, truncatedSubCount: 0 };
+  }
+
+  const videoStreams = streams.filter((s) => s.type === 'video');
+  const audioStreams = streams.filter((s) => s.type === 'audio');
+  const subStreams = streams.filter((s) => s.type === 'subtitle');
+
+  const engAudio = audioStreams.filter((s) => isEnglishStream(s));
+  const nonEngAudio = audioStreams.filter((s) => !isEnglishStream(s));
+
+  const engSub = subStreams.filter((s) => isEnglishStream(s));
+  const nonEngSub = subStreams.filter((s) => !isEnglishStream(s));
+
+  if (streams.length === 0) {
+    return {
+      mapFlags: '-map 0:v -map 0:a:m:language:eng? -map 0:a:m:language:en? -map 0:a:0? -map 0:s:m:language:eng? -map 0:s:m:language:en?',
+      truncatedAudioCount: 0,
+      truncatedSubCount: 0,
+    };
+  }
+
+  const mapParts: string[] = [];
+
+  // Video
+  if (videoStreams.length > 0) {
+    mapParts.push('-map 0:v');
+  } else {
+    mapParts.push('-map 0:0');
+  }
+
+  // Audio
+  if (engAudio.length > 0) {
+    engAudio.forEach((a) => mapParts.push(`-map 0:${a.index}`));
+  } else if (audioStreams.length > 0) {
+    mapParts.push(`-map 0:${audioStreams[0].index}`);
+  }
+
+  // Subtitles
+  if (engSub.length > 0) {
+    engSub.forEach((s) => mapParts.push(`-map 0:${s.index}`));
+  }
+
+  return {
+    mapFlags: mapParts.join(' '),
+    truncatedAudioCount: nonEngAudio.length,
+    truncatedSubCount: nonEngSub.length,
+  };
+}
+
 export function analyzeMediaForChromecast(
   item: Partial<MediaItem>,
   profile: ChromecastProfile = DEFAULT_CHROMECAST_PROFILE,
-  overwriteOriginal: boolean = false
+  overwriteOriginal: boolean = false,
+  englishOnly: boolean = false
 ): AnalysisResult {
   const reasons: string[] = [];
   const streams = item.streams || [];
@@ -127,14 +211,12 @@ export function analyzeMediaForChromecast(
 
   if (videoNeedsReencode) {
     targetVideoCodec = 'libx265';
-    // Visually transparent lossy video encoding (CRF 18 + 10-bit HEVC color depth)
     vCmd = '-c:v libx265 -preset slow -crf 18 -pix_fmt yuv420p10le -tag:v hvc1';
     estimatedSpeed = 'Normal (Full encode)';
   }
 
   if (audioNeedsReencode) {
     targetAudioCodec = 'eac3';
-    // Audibly transparent lossy audio encoding (E-AC-3 768k or AC-3 640k for multi-channel)
     aCmd = '-c:a eac3 -b:a 768k';
     if (estimatedSpeed === 'Ultra Fast (Remux only)') {
       estimatedSpeed = 'Fast (Audio transcode only)';
@@ -143,9 +225,10 @@ export function analyzeMediaForChromecast(
 
   if (subtitleNeedsExtraction) {
     targetSubtitleAction = 'extract_srt';
-    // Copy subtitles as-is (-c:s copy) to safely handle both bitmap (PGS/HDMV/VobSub) and text subtitles in MKV without FFmpeg encoding errors
     sCmd = '-c:s copy';
   }
+
+  const { mapFlags, truncatedAudioCount, truncatedSubCount } = buildFfmpegMapFlags(item, englishOnly);
 
   // Construct shell command
   const inputPath = `"${rawPath}"`;
@@ -158,18 +241,24 @@ export function analyzeMediaForChromecast(
 
   const formatCmd = (cmdBody: string) => `${cmdBody}${postProcess}`;
 
-  let suggestedFfmpegCommand = formatCmd(`ffmpeg ${yFlag}-fflags +genpts -i ${inputPath} ${vCmd} ${aCmd} ${sCmd} -map 0 ${outputPath}`);
+  const langNote = englishOnly
+    ? truncatedAudioCount > 0 || truncatedSubCount > 0
+      ? `Truncating ${truncatedAudioCount} non-English audio track(s) & ${truncatedSubCount} non-English subtitle track(s).`
+      : 'Mapping English audio & subtitle streams only.'
+    : undefined;
+
+  let suggestedFfmpegCommand = formatCmd(`ffmpeg ${yFlag}-fflags +genpts -i ${inputPath} ${vCmd} ${aCmd} ${sCmd} ${mapFlags} ${outputPath}`);
   const commandOptions: { id: string; label: string; command: string; note?: string; recommended?: boolean }[] = [];
 
   if (subtitleNeedsExtraction && !videoNeedsReencode && !audioNeedsReencode) {
-    const stripCmd = formatCmd(`ffmpeg ${yFlag}-fflags +genpts -i ${inputPath} ${vCmd} ${aCmd} -sn ${outputPath}`);
+    const stripCmd = formatCmd(`ffmpeg ${yFlag}-fflags +genpts -i ${inputPath} ${vCmd} ${aCmd} -sn ${mapFlags} ${outputPath}`);
     const srtCmd = `ffmpeg -fflags +genpts -i ${inputPath} -map 0:s:0 "${dirName}/${nameWithoutExt}.en.srt"`;
 
     commandOptions.push({
       id: 'strip-subs',
       label: 'Option 1: Strip Image Subtitles & Fast Remux',
       command: stripCmd,
-      note: 'Removes image/bitmap subtitles causing Jellyfin transcode burn-in.',
+      note: langNote ? `${langNote} Removes image/bitmap subtitles.` : 'Removes image/bitmap subtitles causing Jellyfin transcode burn-in.',
       recommended: true,
     });
     commandOptions.push({
@@ -180,32 +269,32 @@ export function analyzeMediaForChromecast(
     });
     suggestedFfmpegCommand = stripCmd;
   } else if (!videoNeedsReencode && audioNeedsReencode) {
-    const remuxCmd = formatCmd(`ffmpeg ${yFlag}-fflags +genpts -i ${inputPath} -c:v copy ${aCmd} ${sCmd} -map 0 ${outputPath}`);
+    const remuxCmd = formatCmd(`ffmpeg ${yFlag}-fflags +genpts -i ${inputPath} -c:v copy ${aCmd} ${sCmd} ${mapFlags} ${outputPath}`);
     commandOptions.push({
       id: 'audio-transcode',
       label: 'Audio Transcode & Remux (E-AC-3 @ 768k / AC-3 @ 640k)',
       command: remuxCmd,
-      note: 'Fast audio conversion while keeping video stream bit-for-bit identical.',
+      note: langNote ? `${langNote} Fast audio conversion keeping video stream bit-for-bit identical.` : 'Fast audio conversion while keeping video stream bit-for-bit identical.',
       recommended: true,
     });
     suggestedFfmpegCommand = remuxCmd;
   } else if (videoNeedsReencode) {
-    const cpuCmd = formatCmd(`ffmpeg ${yFlag}-fflags +genpts -i ${inputPath} ${vCmd} ${aCmd} ${sCmd} -map 0 ${outputPath}`);
-    const qsvCmd = formatCmd(`ffmpeg ${yFlag}-init_hw_device qsv=hw -filter_hw_device hw -fflags +genpts -i ${inputPath} -c:v hevc_qsv -preset medium -global_quality 18 ${aCmd} ${sCmd} -map 0 ${outputPath}`);
-    const vaapiCmd = formatCmd(`ffmpeg ${yFlag}-vaapi_device /dev/dri/renderD128 -fflags +genpts -i ${inputPath} -vf 'format=nv12,hwupload' -c:v hevc_vaapi -qp 18 ${aCmd} ${sCmd} -map 0 ${outputPath}`);
+    const cpuCmd = formatCmd(`ffmpeg ${yFlag}-fflags +genpts -i ${inputPath} ${vCmd} ${aCmd} ${sCmd} ${mapFlags} ${outputPath}`);
+    const qsvCmd = formatCmd(`ffmpeg ${yFlag}-init_hw_device qsv=hw -filter_hw_device hw -fflags +genpts -i ${inputPath} -c:v hevc_qsv -preset medium -global_quality 18 ${aCmd} ${sCmd} ${mapFlags} ${outputPath}`);
+    const vaapiCmd = formatCmd(`ffmpeg ${yFlag}-vaapi_device /dev/dri/renderD128 -fflags +genpts -i ${inputPath} -vf 'format=nv12,hwupload' -c:v hevc_vaapi -qp 18 ${aCmd} ${sCmd} ${mapFlags} ${outputPath}`);
 
     commandOptions.push({
       id: 'cpu-transcode',
       label: 'Option 1: Guaranteed CPU Transcode (CRF 18 - x265 10-bit)',
       command: cpuCmd,
-      note: 'Universal CPU transcode. Works on all machines without requiring GPU render device permissions.',
+      note: langNote ? `${langNote} Universal CPU transcode.` : 'Universal CPU transcode. Works on all machines without requiring GPU render device permissions.',
       recommended: true,
     });
     commandOptions.push({
       id: 'qsv-transcode',
       label: 'Option 2: Intel QSV Hardware Acceleration (i7-7700T / HD 630 iGPU)',
       command: qsvCmd,
-      note: 'Fast Intel QuickSync hardware encoding. Note: User must be in render group (`sudo usermod -aG render,video $USER`).',
+      note: langNote ? `${langNote} Fast Intel QuickSync hardware encoding.` : 'Fast Intel QuickSync hardware encoding. Note: User must be in render group (`sudo usermod -aG render,video $USER`).',
     });
     commandOptions.push({
       id: 'vaapi-transcode',
@@ -215,11 +304,12 @@ export function analyzeMediaForChromecast(
     });
     suggestedFfmpegCommand = cpuCmd;
   } else {
-    const defaultCmd = formatCmd(`ffmpeg ${yFlag}-fflags +genpts -i ${inputPath} ${vCmd} ${aCmd} ${sCmd} -map 0 ${outputPath}`);
+    const defaultCmd = formatCmd(`ffmpeg ${yFlag}-fflags +genpts -i ${inputPath} ${vCmd} ${aCmd} ${sCmd} ${mapFlags} ${outputPath}`);
     commandOptions.push({
       id: 'default-cmd',
       label: 'FFmpeg Command',
       command: defaultCmd,
+      note: langNote,
       recommended: true,
     });
     suggestedFfmpegCommand = defaultCmd;
@@ -249,3 +339,171 @@ export function analyzeMediaForChromecast(
     },
   };
 }
+
+export interface BatchShowOption {
+  id: string;
+  label: string;
+  command: string;
+  note?: string;
+  recommended?: boolean;
+}
+
+export function generateBatchShowCommands(
+  episodes: MediaItem[],
+  profile: ChromecastProfile = DEFAULT_CHROMECAST_PROFILE,
+  overwriteOriginal: boolean = false,
+  englishOnly: boolean = false
+): {
+  showDir: string;
+  needsTranscodeCount: number;
+  batchOptions: BatchShowOption[];
+} {
+  if (!episodes || episodes.length === 0) {
+    return { showDir: '', needsTranscodeCount: 0, batchOptions: [] };
+  }
+
+  // 1. Determine show directory
+  const paths = episodes.map((e) => e.filePath || '').filter(Boolean);
+  let showDir = '';
+  if (paths.length > 0) {
+    const firstDir = paths[0].substring(0, paths[0].lastIndexOf('/'));
+    if (firstDir.match(/\/season\s*\d+$/i)) {
+      showDir = firstDir.substring(0, firstDir.lastIndexOf('/'));
+    } else {
+      showDir = firstDir;
+    }
+  } else {
+    showDir = episodes[0].directory || '/media/tv';
+  }
+
+  // 2. Determine show-wide transcode requirements
+  let videoNeedsReencode = false;
+  let audioNeedsReencode = false;
+  let subtitleNeedsExtraction = false;
+  let transcodeCount = 0;
+
+  episodes.forEach((ep) => {
+    const analysis = analyzeMediaForChromecast(ep, profile, overwriteOriginal, englishOnly);
+    if (analysis.needsTranscode) {
+      transcodeCount++;
+    }
+    const streams = ep.streams || [];
+    const videoStreams = streams.filter((s) => s.type === 'video');
+    const audioStreams = streams.filter((s) => s.type === 'audio');
+    const subtitleStreams = streams.filter((s) => s.type === 'subtitle');
+
+    videoStreams.forEach((v) => {
+      const codec = (v.codec || '').toLowerCase();
+      const pixFmt = (v.pixelFormat || '').toLowerCase();
+      const bitDepth = v.bitDepth || (pixFmt.includes('10le') || pixFmt.includes('p10') ? 10 : 8);
+      if ((codec.includes('h264') || codec.includes('avc')) && (bitDepth > 8 || pixFmt.includes('10le') || v.profile?.toLowerCase().includes('high 10'))) {
+        videoNeedsReencode = true;
+      }
+      if (codec.includes('vc1') || codec.includes('mpeg2') || codec.includes('wmv')) {
+        videoNeedsReencode = true;
+      }
+    });
+
+    audioStreams.forEach((a) => {
+      const codec = (a.codec || '').toLowerCase();
+      if (codec.includes('dts') || codec.includes('truehd') || codec.includes('flac')) {
+        audioNeedsReencode = true;
+      }
+    });
+
+    subtitleStreams.forEach((s) => {
+      const codec = (s.codec || '').toLowerCase();
+      if (codec.includes('pgs') || codec.includes('hdmv') || codec.includes('ass') || codec.includes('vobsub')) {
+        subtitleNeedsExtraction = true;
+      }
+    });
+  });
+
+  const vCmd = videoNeedsReencode
+    ? '-c:v libx265 -preset slow -crf 18 -pix_fmt yuv420p10le -tag:v hvc1'
+    : '-c:v copy';
+  const aCmd = audioNeedsReencode ? '-c:a eac3 -b:a 768k' : '-c:a copy';
+  const sCmd = subtitleNeedsExtraction ? '-c:s copy' : '-c:s copy';
+
+  const mapFlags = englishOnly
+    ? '-map 0:v -map 0:a:m:language:eng? -map 0:a:m:language:en? -map 0:a:0? -map 0:s:m:language:eng? -map 0:s:m:language:en?'
+    : '-map 0';
+
+  const langSuffixNote = englishOnly
+    ? ' Truncates non-English audio & subtitle streams (retains English tracks).'
+    : '';
+
+  const yFlag = overwriteOriginal ? '-y ' : '';
+  const escapedDir = `"${showDir}"`;
+
+  const batchOptions: BatchShowOption[] = [];
+
+  if (overwriteOriginal) {
+    const recursiveFindCmd = `find ${escapedDir} -type f \\( -name "*.mkv" -o -name "*.mp4" -o -name "*.m2ts" \\) -exec sh -c 'for f; do ffmpeg ${yFlag}-fflags +genpts -i "$f" ${vCmd} ${aCmd} ${sCmd} ${mapFlags} "\${f%.*}.tmp.\${f##*.}" && mv -f "\${f%.*}.tmp.\${f##*.}" "$f"; done' _ {} +`;
+
+    const folderLoopCmd = `for f in ${escapedDir}/*.mkv; do [ -f "$f" ] || continue; ffmpeg ${yFlag}-fflags +genpts -i "$f" ${vCmd} ${aCmd} ${sCmd} ${mapFlags} "\${f%.mkv}.tmp.mkv" && mv -f "\${f%.mkv}.tmp.mkv" "$f"; done`;
+
+    batchOptions.push({
+      id: 'batch-recursive-overwrite',
+      label: 'Batch Loop (Recursive - All Seasons & Subfolders)',
+      command: recursiveFindCmd,
+      note: `Recursively finds all video files in the show directory (including Season folders) and processes them sequentially in-place.${langSuffixNote}`,
+      recommended: true,
+    });
+
+    batchOptions.push({
+      id: 'batch-folder-overwrite',
+      label: 'Batch Loop (Single Directory)',
+      command: folderLoopCmd,
+      note: `Processes all .mkv files directly inside the specified folder in-place.${langSuffixNote}`,
+    });
+
+    if (videoNeedsReencode) {
+      const qsvBatchCmd = `find ${escapedDir} -type f \\( -name "*.mkv" -o -name "*.mp4" \\) -exec sh -c 'for f; do ffmpeg ${yFlag}-init_hw_device qsv=hw -filter_hw_device hw -fflags +genpts -i "$f" -c:v hevc_qsv -preset medium -global_quality 18 ${aCmd} ${sCmd} ${mapFlags} "\${f%.*}.tmp.\${f##*.}" && mv -f "\${f%.*}.tmp.\${f##*.}" "$f"; done' _ {} +`;
+
+      batchOptions.push({
+        id: 'batch-qsv-overwrite',
+        label: 'Batch Loop with Intel QSV Hardware Acceleration',
+        command: qsvBatchCmd,
+        note: `Hardware-accelerated Intel QuickSync HEVC batch conversion across all seasons.${langSuffixNote}`,
+      });
+    }
+  } else {
+    const recursiveFindCmd = `find ${escapedDir} -type f \\( -name "*.mkv" -o -name "*.mp4" -o -name "*.m2ts" \\) -exec sh -c 'for f; do ffmpeg -fflags +genpts -i "$f" ${vCmd} ${aCmd} ${sCmd} ${mapFlags} "\${f%.*}.optimized.\${f##*.}"; done' _ {} +`;
+
+    const folderLoopCmd = `for f in ${escapedDir}/*.mkv; do [ -f "$f" ] || continue; ffmpeg -fflags +genpts -i "$f" ${vCmd} ${aCmd} ${sCmd} ${mapFlags} "\${f%.mkv}.optimized.mkv"; done`;
+
+    batchOptions.push({
+      id: 'batch-recursive-opt',
+      label: 'Batch Loop (Recursive - All Seasons & Subfolders)',
+      command: recursiveFindCmd,
+      note: `Recursively converts all episodes in the show folder, outputting new .optimized files alongside originals.${langSuffixNote}`,
+      recommended: true,
+    });
+
+    batchOptions.push({
+      id: 'batch-folder-opt',
+      label: 'Batch Loop (Single Directory)',
+      command: folderLoopCmd,
+      note: `Converts all .mkv files directly in the show folder into .optimized.mkv files.${langSuffixNote}`,
+    });
+
+    if (videoNeedsReencode) {
+      const qsvBatchCmd = `find ${escapedDir} -type f \\( -name "*.mkv" -o -name "*.mp4" \\) -exec sh -c 'for f; do ffmpeg -init_hw_device qsv=hw -filter_hw_device hw -fflags +genpts -i "$f" -c:v hevc_qsv -preset medium -global_quality 18 ${aCmd} ${sCmd} ${mapFlags} "\${f%.*}.optimized.\${f##*.}"; done' _ {} +`;
+
+      batchOptions.push({
+        id: 'batch-qsv-opt',
+        label: 'Batch Loop with Intel QSV Hardware Acceleration',
+        command: qsvBatchCmd,
+        note: `Hardware-accelerated Intel QuickSync HEVC batch conversion saving to .optimized files.${langSuffixNote}`,
+      });
+    }
+  }
+
+  return {
+    showDir,
+    needsTranscodeCount: transcodeCount,
+    batchOptions,
+  };
+}
+

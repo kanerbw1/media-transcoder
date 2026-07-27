@@ -20,7 +20,7 @@ import {
   Folder,
 } from 'lucide-react';
 import { MediaItem } from '../types';
-import { analyzeMediaForChromecast } from '../utils/chromecastSpecs';
+import { analyzeMediaForChromecast, generateBatchShowCommands, isEnglishStream } from '../utils/chromecastSpecs';
 
 interface MediaLibraryViewProps {
   mediaItems: MediaItem[];
@@ -70,6 +70,7 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({
   const [sendingNtfyId, setSendingNtfyId] = useState<string | null>(null);
   const [expandedShows, setExpandedShows] = useState<Record<string, boolean>>({});
   const [overwriteMap, setOverwriteMap] = useState<Record<string, boolean>>({});
+  const [englishOnlyMap, setEnglishOnlyMap] = useState<Record<string, boolean>>({});
 
   const handleCopyCommand = async (command: string, id: string) => {
     let success = false;
@@ -351,6 +352,131 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({
                   {/* Episodes List inside Show Card */}
                   {isExpanded && (
                     <div className="p-4 bg-slate-950/60 border-t border-slate-800 space-y-4">
+                      {/* Show-Wide Batch FFmpeg Commands */}
+                      {(() => {
+                        const showOverwriteKey = `show-${group.showName}`;
+                        const showEnglishKey = `show-eng-${group.showName}`;
+                        const isShowOverwrite = !!overwriteMap[showOverwriteKey];
+                        const isShowEnglishOnly = !!englishOnlyMap[showEnglishKey];
+                        const batchInfo = generateBatchShowCommands(group.episodes, undefined, isShowOverwrite, isShowEnglishOnly);
+
+                        if (batchInfo.batchOptions.length === 0) return null;
+
+                        return (
+                          <div className="p-3.5 bg-indigo-950/40 border border-indigo-500/30 rounded-lg space-y-3 mb-4">
+                            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-indigo-500/20 pb-2">
+                              <div className="flex items-center space-x-2">
+                                <Terminal className="w-4 h-4 text-indigo-400" />
+                                <h4 className="text-xs font-bold text-indigo-200 uppercase tracking-wider font-mono">
+                                  Batch FFmpeg Commands (Entire Show - {group.episodes.length} Episodes)
+                                </h4>
+                              </div>
+
+                              <div className="flex flex-wrap items-center gap-2">
+                                <label
+                                  title="Toggle keeping English audio & subtitle tracks only (stripping non-English tracks)"
+                                  className="inline-flex items-center gap-1.5 text-[10px] font-medium text-indigo-200 hover:text-white cursor-pointer select-none bg-indigo-950/80 px-2.5 py-1 rounded border border-indigo-700/80"
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={isShowEnglishOnly}
+                                    onChange={(e) =>
+                                      setEnglishOnlyMap((prev) => ({
+                                        ...prev,
+                                        [showEnglishKey]: e.target.checked,
+                                      }))
+                                    }
+                                    className="w-3 h-3 rounded border-indigo-700 bg-slate-950 text-indigo-500 focus:ring-indigo-500 cursor-pointer"
+                                  />
+                                  <span>Keep English tracks only</span>
+                                </label>
+
+                                <label
+                                  title="Toggle between saving as .optimized files vs overwriting original files in-place"
+                                  className="inline-flex items-center gap-1.5 text-[10px] font-medium text-indigo-200 hover:text-white cursor-pointer select-none bg-indigo-950/80 px-2.5 py-1 rounded border border-indigo-700/80"
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={isShowOverwrite}
+                                    onChange={(e) =>
+                                      setOverwriteMap((prev) => ({
+                                        ...prev,
+                                        [showOverwriteKey]: e.target.checked,
+                                      }))
+                                    }
+                                    className="w-3 h-3 rounded border-indigo-700 bg-slate-950 text-indigo-500 focus:ring-indigo-500 cursor-pointer"
+                                  />
+                                  <span>Overwrite originals</span>
+                                </label>
+                              </div>
+                            </div>
+
+                            <p className="text-[11px] text-slate-300 font-mono">
+                              Directory Path:{' '}
+                              <span className="text-indigo-300 bg-indigo-950/80 px-2 py-0.5 rounded border border-indigo-800/40">
+                                {batchInfo.showDir}
+                              </span>
+                            </p>
+
+                            <div className="space-y-2">
+                              {batchInfo.batchOptions.map((bOpt, bIdx) => {
+                                const copyKey = `batch-${group.showName}-${bOpt.id || bIdx}`;
+                                return (
+                                  <div
+                                    key={bOpt.id || bIdx}
+                                    className="bg-slate-950 border border-indigo-900/60 rounded p-2.5 space-y-1.5"
+                                  >
+                                    <div className="flex items-center justify-between gap-2">
+                                      <div className="flex items-center gap-1.5 min-w-0">
+                                        <span className="text-[11px] font-bold text-slate-200 font-mono truncate">
+                                          {bOpt.label}
+                                        </span>
+                                        {bOpt.recommended && (
+                                          <span className="px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 rounded font-mono shrink-0">
+                                            Recommended
+                                          </span>
+                                        )}
+                                      </div>
+
+                                      <button
+                                        onClick={() => handleCopyCommand(bOpt.command, copyKey)}
+                                        className="inline-flex items-center px-2 py-0.5 text-[10px] font-semibold bg-indigo-900/60 hover:bg-indigo-800 text-indigo-200 border border-indigo-700 rounded transition cursor-pointer font-mono shrink-0"
+                                      >
+                                        {copiedId === copyKey ? (
+                                          <>
+                                            <Check className="w-3 h-3 mr-1 text-emerald-400" />
+                                            Copied!
+                                          </>
+                                        ) : (
+                                          <>
+                                            <Copy className="w-3 h-3 mr-1" />
+                                            Copy Batch Command
+                                          </>
+                                        )}
+                                      </button>
+                                    </div>
+
+                                    {bOpt.note && (
+                                      <p className="text-[10px] text-slate-400 leading-tight font-sans">
+                                        {bOpt.note}
+                                      </p>
+                                    )}
+
+                                    <pre
+                                      onClick={() => handleCopyCommand(bOpt.command, copyKey)}
+                                      title="Click to copy command"
+                                      className="p-2 bg-slate-900/90 hover:bg-slate-900 text-emerald-400 font-mono text-[10px] rounded overflow-x-auto border border-indigo-900/40 leading-relaxed cursor-pointer select-all transition"
+                                    >
+                                      {bOpt.command}
+                                    </pre>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        );
+                      })()}
+
                       <div className="text-xs font-mono uppercase tracking-wider text-slate-400 font-bold mb-2 flex items-center gap-2">
                         <Layers className="w-4 h-4 text-indigo-400" />
                         Episodes in {group.showName}:
@@ -484,12 +610,36 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({
                                   </div>
                                   {audioStreams.length > 0 ? (
                                     <div className="font-mono text-slate-300 space-y-1 text-[11px]">
-                                      {audioStreams.map((audio, idx) => (
-                                        <div key={idx} className="border-b border-slate-800/60 pb-1 last:border-0">
-                                          <span className="text-slate-500">#{idx + 1}: </span>
-                                          <strong className="text-white uppercase font-bold">{audio.codec}</strong> ({audio.channels || 2}ch)
-                                        </div>
-                                      ))}
+                                      {audioStreams.map((audio, idx) => {
+                                        const isEng = isEnglishStream(audio);
+                                        const isItemEngOnly = !!englishOnlyMap[`eng-${item.id}`];
+                                        const isTruncated = isItemEngOnly && !isEng;
+                                        const langLabel = audio.language ? audio.language.toUpperCase() : 'UND';
+
+                                        return (
+                                          <div
+                                            key={idx}
+                                            className={`border-b border-slate-800/60 pb-1 last:border-0 flex items-center justify-between gap-1 ${
+                                              isTruncated ? 'opacity-40 line-through' : ''
+                                            }`}
+                                          >
+                                            <div className="min-w-0 truncate">
+                                              <span className="text-slate-500">#{idx + 1}: </span>
+                                              <strong className="text-white uppercase font-bold">{audio.codec}</strong> ({audio.channels || 2}ch)
+                                              {audio.title && <span className="text-slate-400 text-[10px] ml-1">({audio.title})</span>}
+                                            </div>
+                                            <span
+                                              className={`px-1.5 py-0.2 rounded text-[9px] font-bold font-mono uppercase shrink-0 ${
+                                                isEng
+                                                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                                                  : 'bg-slate-800 text-slate-400 border border-slate-700'
+                                              }`}
+                                            >
+                                              {langLabel} {isTruncated ? '• Truncated' : ''}
+                                            </span>
+                                          </div>
+                                        );
+                                      })}
                                     </div>
                                   ) : (
                                     <div className="text-slate-500 italic font-mono text-[11px]">No audio stream</div>
@@ -506,20 +656,44 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({
                                   </div>
                                   {subtitleStreams.length > 0 ? (
                                     <div className="font-mono text-slate-300 space-y-1 text-[11px]">
-                                      {subtitleStreams.map((sub, idx) => (
-                                        <div key={idx} className="border-b border-slate-800/60 pb-1 last:border-0">
-                                          <span className="text-slate-500">#{idx + 1}: </span>
-                                          <strong
-                                            className={
-                                              sub.codec.includes('pgs') || sub.codec.includes('ass')
-                                                ? 'text-amber-400 uppercase font-bold'
-                                                : 'text-slate-200 uppercase'
-                                            }
+                                      {subtitleStreams.map((sub, idx) => {
+                                        const isEng = isEnglishStream(sub);
+                                        const isItemEngOnly = !!englishOnlyMap[`eng-${item.id}`];
+                                        const isTruncated = isItemEngOnly && !isEng;
+                                        const langLabel = sub.language ? sub.language.toUpperCase() : 'UND';
+
+                                        return (
+                                          <div
+                                            key={idx}
+                                            className={`border-b border-slate-800/60 pb-1 last:border-0 flex items-center justify-between gap-1 ${
+                                              isTruncated ? 'opacity-40 line-through' : ''
+                                            }`}
                                           >
-                                            {sub.codec}
-                                          </strong>
-                                        </div>
-                                      ))}
+                                            <div className="min-w-0 truncate">
+                                              <span className="text-slate-500">#{idx + 1}: </span>
+                                              <strong
+                                                className={
+                                                  sub.codec.includes('pgs') || sub.codec.includes('ass')
+                                                    ? 'text-amber-400 uppercase font-bold'
+                                                    : 'text-slate-200 uppercase'
+                                                }
+                                              >
+                                                {sub.codec}
+                                              </strong>
+                                              {sub.title && <span className="text-slate-400 text-[10px] ml-1">({sub.title})</span>}
+                                            </div>
+                                            <span
+                                              className={`px-1.5 py-0.2 rounded text-[9px] font-bold font-mono uppercase shrink-0 ${
+                                                isEng
+                                                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                                                  : 'bg-slate-800 text-slate-400 border border-slate-700'
+                                              }`}
+                                            >
+                                              {langLabel} {isTruncated ? '• Truncated' : ''}
+                                            </span>
+                                          </div>
+                                        );
+                                      })}
                                     </div>
                                   ) : (
                                     <div className="text-slate-500 italic font-mono text-[11px]">No embedded subtitles</div>
@@ -547,7 +721,8 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({
 
                                   {item.recommendation && (() => {
                                     const isOverwrite = !!overwriteMap[item.id];
-                                    const analysis = analyzeMediaForChromecast(item, undefined, isOverwrite);
+                                    const isEnglishOnly = !!englishOnlyMap[`eng-${item.id}`];
+                                    const analysis = analyzeMediaForChromecast(item, undefined, isOverwrite, isEnglishOnly);
                                     const options = analysis.recommendation.commandOptions && analysis.recommendation.commandOptions.length > 0
                                       ? analysis.recommendation.commandOptions
                                       : [{ id: 'cmd-0', label: 'FFmpeg Command', command: analysis.recommendation.suggestedFfmpegCommand }];
@@ -560,23 +735,43 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({
                                             FFmpeg Command Options ({item.recommendation.estimatedSpeed}):
                                           </span>
 
-                                          <label
-                                            title="Toggle between saving as .optimized file vs overwriting original file"
-                                            className="inline-flex items-center gap-1.5 text-[10px] font-medium text-slate-300 hover:text-white cursor-pointer select-none bg-slate-900/90 px-2 py-0.5 rounded border border-slate-700/80"
-                                          >
-                                            <input
-                                              type="checkbox"
-                                              checked={isOverwrite}
-                                              onChange={(e) =>
-                                                setOverwriteMap((prev) => ({
-                                                  ...prev,
-                                                  [item.id]: e.target.checked,
-                                                }))
-                                              }
-                                              className="w-3 h-3 rounded border-slate-700 bg-slate-950 text-indigo-500 focus:ring-indigo-500 cursor-pointer"
-                                            />
-                                            <span>Overwrite original</span>
-                                          </label>
+                                          <div className="flex flex-wrap items-center gap-2">
+                                            <label
+                                              title="Toggle keeping English audio & subtitle tracks only (stripping non-English tracks)"
+                                              className="inline-flex items-center gap-1.5 text-[10px] font-medium text-slate-300 hover:text-white cursor-pointer select-none bg-slate-900/90 px-2 py-0.5 rounded border border-slate-700/80"
+                                            >
+                                              <input
+                                                type="checkbox"
+                                                checked={isEnglishOnly}
+                                                onChange={(e) =>
+                                                  setEnglishOnlyMap((prev) => ({
+                                                    ...prev,
+                                                    [`eng-${item.id}`]: e.target.checked,
+                                                  }))
+                                                }
+                                                className="w-3 h-3 rounded border-slate-700 bg-slate-950 text-indigo-500 focus:ring-indigo-500 cursor-pointer"
+                                              />
+                                              <span>Keep English tracks only</span>
+                                            </label>
+
+                                            <label
+                                              title="Toggle between saving as .optimized file vs overwriting original file"
+                                              className="inline-flex items-center gap-1.5 text-[10px] font-medium text-slate-300 hover:text-white cursor-pointer select-none bg-slate-900/90 px-2 py-0.5 rounded border border-slate-700/80"
+                                            >
+                                              <input
+                                                type="checkbox"
+                                                checked={isOverwrite}
+                                                onChange={(e) =>
+                                                  setOverwriteMap((prev) => ({
+                                                    ...prev,
+                                                    [item.id]: e.target.checked,
+                                                  }))
+                                                }
+                                                className="w-3 h-3 rounded border-slate-700 bg-slate-950 text-indigo-500 focus:ring-indigo-500 cursor-pointer"
+                                              />
+                                              <span>Overwrite original</span>
+                                            </label>
+                                          </div>
                                         </div>
 
                                         <div className="space-y-2">
