@@ -483,24 +483,31 @@ export function analyzeMediaForChromecast(
 
     commandOptions.push({
       id: 'keep-subs-remux',
-      label: 'Option 1: Fast Remux & Keep Selected Streams (-c:s copy)',
+      label: 'Option 1: Remux & Keep Subtitles (-c:s copy)',
       command: keepCmd,
-      note: langNote ? `${langNote} Preserves selected subtitle tracks.` : 'Preserves selected video, audio, and subtitle tracks in MKV. (Note: Image/bitmap subtitles like PGS may cause Jellyfin burn-in on Chromecast).',
-      recommended: true,
-    });
-    commandOptions.push({
-      id: 'extract-srt',
-      label: 'Option 2: Extract Subtitle Track to External SRT Sidecar',
-      command: srtCmd,
-      note: 'Extracts text subtitle stream to a sidecar .srt file for direct playback.',
+      note: langNote ? `${langNote} Preserves selected subtitle tracks.` : 'Preserves selected video, audio, and subtitle tracks in MKV. (Note: Retains PGS/bitmap subtitles inside the file. Rescanning will still report PGS subtitles present).',
+      recommended: false,
     });
     commandOptions.push({
       id: 'strip-subs',
-      label: 'Option 3: Strip Image Subtitles (-sn)',
+      label: 'Option 2: Strip Subtitles (-sn) for 100% Direct Play',
       command: stripCmd,
-      note: 'Strips subtitle streams completely to ensure zero transcode risk on Chromecast.',
+      note: 'Strips subtitle streams completely with -sn. Resolves the PGS burn-in notice upon rescan and guarantees 100% Direct Play on Chromecast.',
+      recommended: true,
     });
-    suggestedFfmpegCommand = keepCmd;
+    commandOptions.push({
+      id: 'remux-plus-srt',
+      label: 'Option 3: Remux MKV & Save Subtitles as External .SRT File',
+      command: `${keepCmd} && ffmpeg -fflags +genpts -y -i ${inputPath} -map 0:s:0 "${dirName}/${nameWithoutExt}.en.srt"`,
+      note: 'Copies video and audio instantly while saving the subtitle track into a separate external .srt file for direct playback on Chromecast without video burn-in.',
+    });
+    commandOptions.push({
+      id: 'extract-srt-only',
+      label: 'Option 4: Extract Subtitles as External .SRT File Only (No Remux)',
+      command: srtCmd,
+      note: 'Extracts the subtitle track into a separate external .srt file without touching or re-processing the original video file.',
+    });
+    suggestedFfmpegCommand = stripCmd;
   } else if (!videoNeedsReencode && audioNeedsReencode) {
     const remuxCmd = formatCmd(`ffmpeg ${yFlag}-fflags +genpts -i ${inputPath} -c:v copy ${aCmd} ${sCmd} ${mapFlags} ${outputPath}`);
     commandOptions.push({
@@ -656,7 +663,7 @@ export function generateBatchShowCommands(
     ? '-c:v libx265 -preset slow -crf 18 -pix_fmt yuv420p10le -tag:v hvc1'
     : '-c:v copy';
   const aCmd = audioNeedsReencode ? '-c:a eac3 -b:a 768k' : '-c:a copy';
-  const sCmd = subtitleNeedsExtraction ? '-c:s copy' : '-c:s copy';
+  const sCmd = subtitleNeedsExtraction ? '-sn' : '-c:s copy';
 
   let mapFlags = '-map 0';
   let langSuffixNote = '';
@@ -816,7 +823,7 @@ export function generateBulkSelectedItemsCommand(
 
   // Alternative bash array loop command for iterating over selected paths
   const bashLoopCommand = filePathsList.length > 0
-    ? `files=(\n  ${filePathsList.join('\n  ')}\n)\n\nfor f in "\${files[@]}"; do\n  echo "Processing: $f"\n  ffmpeg -fflags +genpts -i "$f" -c:v copy -c:a eac3 -b:a 768k -c:s copy "\${f%.*}.optimized.mkv"\ndone`
+    ? `files=(\n  ${filePathsList.join('\n  ')}\n)\n\nfor f in "\${files[@]}"; do\n  echo "Processing: $f"\n  ffmpeg -fflags +genpts -i "$f" -c:v copy -c:a eac3 -b:a 768k -sn "\${f%.*}.optimized.mkv"\ndone`
     : '';
 
   return {
