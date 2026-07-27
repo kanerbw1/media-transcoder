@@ -480,26 +480,27 @@ export function analyzeMediaForChromecast(
     const keepCmd = formatCmd(`ffmpeg ${yFlag}-fflags +genpts -i ${inputPath} ${vCmd} ${aCmd} ${sCmd} ${mapFlags} ${outputPath}`);
     const stripCmd = formatCmd(`ffmpeg ${yFlag}-fflags +genpts -i ${inputPath} ${vCmd} ${aCmd} -sn ${mapFlags} ${outputPath}`);
     const srtCmd = `ffmpeg -fflags +genpts -i ${inputPath} -map 0:s:0 "${dirName}/${nameWithoutExt}.en.srt"`;
+    const remuxPlusSrtCmd = `${keepCmd} && ffmpeg -fflags +genpts -y -i ${inputPath} -map 0:s:0 "${dirName}/${nameWithoutExt}.en.srt"`;
 
     commandOptions.push({
-      id: 'keep-subs-remux',
-      label: 'Option 1: Remux & Keep Subtitles (-c:s copy)',
-      command: keepCmd,
-      note: langNote ? `${langNote} Preserves selected subtitle tracks.` : 'Preserves selected video, audio, and subtitle tracks in MKV. (Note: Retains PGS/bitmap subtitles inside the file. Rescanning will still report PGS subtitles present).',
-      recommended: false,
+      id: 'remux-plus-srt',
+      label: 'Option 1: Remux MKV & Save Subtitles as External .SRT File',
+      command: remuxPlusSrtCmd,
+      note: 'Copies video and audio instantly while saving the subtitle track into a separate external .srt file for direct playback on Chromecast without video burn-in.',
+      recommended: true,
     });
     commandOptions.push({
       id: 'strip-subs',
       label: 'Option 2: Strip Subtitles (-sn) for 100% Direct Play',
       command: stripCmd,
       note: 'Strips subtitle streams completely with -sn. Resolves the PGS burn-in notice upon rescan and guarantees 100% Direct Play on Chromecast.',
-      recommended: true,
+      recommended: false,
     });
     commandOptions.push({
-      id: 'remux-plus-srt',
-      label: 'Option 3: Remux MKV & Save Subtitles as External .SRT File',
-      command: `${keepCmd} && ffmpeg -fflags +genpts -y -i ${inputPath} -map 0:s:0 "${dirName}/${nameWithoutExt}.en.srt"`,
-      note: 'Copies video and audio instantly while saving the subtitle track into a separate external .srt file for direct playback on Chromecast without video burn-in.',
+      id: 'keep-subs-remux',
+      label: 'Option 3: Remux & Keep Subtitles (-c:s copy)',
+      command: keepCmd,
+      note: langNote ? `${langNote} Preserves selected subtitle tracks.` : 'Preserves selected video, audio, and subtitle tracks in MKV. (Note: Retains PGS/bitmap subtitles inside the file. Rescanning will still report PGS subtitles present).',
     });
     commandOptions.push({
       id: 'extract-srt-only',
@@ -507,7 +508,7 @@ export function analyzeMediaForChromecast(
       command: srtCmd,
       note: 'Extracts the subtitle track into a separate external .srt file without touching or re-processing the original video file.',
     });
-    suggestedFfmpegCommand = stripCmd;
+    suggestedFfmpegCommand = remuxPlusSrtCmd;
   } else if (!videoNeedsReencode && audioNeedsReencode) {
     const remuxCmd = formatCmd(`ffmpeg ${yFlag}-fflags +genpts -i ${inputPath} -c:v copy ${aCmd} ${sCmd} ${mapFlags} ${outputPath}`);
     commandOptions.push({
