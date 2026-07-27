@@ -477,14 +477,15 @@ export function analyzeMediaForChromecast(
   const commandOptions: { id: string; label: string; command: string; note?: string; recommended?: boolean }[] = [];
 
   if (subtitleNeedsExtraction && !videoNeedsReencode && !audioNeedsReencode) {
+    const keepCmd = formatCmd(`ffmpeg ${yFlag}-fflags +genpts -i ${inputPath} ${vCmd} ${aCmd} ${sCmd} ${mapFlags} ${outputPath}`);
     const stripCmd = formatCmd(`ffmpeg ${yFlag}-fflags +genpts -i ${inputPath} ${vCmd} ${aCmd} -sn ${mapFlags} ${outputPath}`);
     const srtCmd = `ffmpeg -fflags +genpts -i ${inputPath} -map 0:s:0 "${dirName}/${nameWithoutExt}.en.srt"`;
 
     commandOptions.push({
-      id: 'strip-subs',
-      label: 'Option 1: Strip Image Subtitles & Fast Remux',
-      command: stripCmd,
-      note: langNote ? `${langNote} Removes image/bitmap subtitles.` : 'Removes image/bitmap subtitles causing Jellyfin transcode burn-in.',
+      id: 'keep-subs-remux',
+      label: 'Option 1: Fast Remux & Keep Selected Streams (-c:s copy)',
+      command: keepCmd,
+      note: langNote ? `${langNote} Preserves selected subtitle tracks.` : 'Preserves selected video, audio, and subtitle tracks in MKV. (Note: Image/bitmap subtitles like PGS may cause Jellyfin burn-in on Chromecast).',
       recommended: true,
     });
     commandOptions.push({
@@ -493,7 +494,13 @@ export function analyzeMediaForChromecast(
       command: srtCmd,
       note: 'Extracts text subtitle stream to a sidecar .srt file for direct playback.',
     });
-    suggestedFfmpegCommand = stripCmd;
+    commandOptions.push({
+      id: 'strip-subs',
+      label: 'Option 3: Strip Image Subtitles (-sn)',
+      command: stripCmd,
+      note: 'Strips subtitle streams completely to ensure zero transcode risk on Chromecast.',
+    });
+    suggestedFfmpegCommand = keepCmd;
   } else if (!videoNeedsReencode && audioNeedsReencode) {
     const remuxCmd = formatCmd(`ffmpeg ${yFlag}-fflags +genpts -i ${inputPath} -c:v copy ${aCmd} ${sCmd} ${mapFlags} ${outputPath}`);
     commandOptions.push({
