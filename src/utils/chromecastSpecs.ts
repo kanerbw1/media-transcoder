@@ -737,3 +737,87 @@ export function generateBatchShowCommands(
   };
 }
 
+export interface BulkProcessResult {
+  itemCount: number;
+  transcodeCount: number;
+  bulkFfmpegCommand: string;
+  bashLoopCommand: string;
+  items: {
+    id: string;
+    title: string;
+    fileName: string;
+    filePath: string;
+    needsTranscode: boolean;
+    command: string;
+  }[];
+}
+
+export function generateBulkSelectedItemsCommand(
+  selectedItems: MediaItem[],
+  profile: ChromecastProfile = DEFAULT_CHROMECAST_PROFILE,
+  overwriteMap: Record<string, boolean> = {},
+  selectedStreamsMap: Record<string, number[]> = {}
+): BulkProcessResult {
+  if (!selectedItems || selectedItems.length === 0) {
+    return {
+      itemCount: 0,
+      transcodeCount: 0,
+      bulkFfmpegCommand: '# No items selected for batch processing',
+      bashLoopCommand: '# No items selected',
+      items: [],
+    };
+  }
+
+  const itemsInfo: BulkProcessResult['items'] = [];
+  let transcodeCount = 0;
+  const individualCmds: string[] = [];
+  const filePathsList: string[] = [];
+
+  selectedItems.forEach((item) => {
+    const isOverwrite = !!overwriteMap[item.id];
+    const selectedIndices = selectedStreamsMap[item.id] !== undefined
+      ? selectedStreamsMap[item.id]
+      : (item.streams || []).map((s) => s.index);
+
+    const analysis = analyzeMediaForChromecast(item, profile, isOverwrite, selectedIndices);
+    if (analysis.needsTranscode) {
+      transcodeCount++;
+    }
+
+    const cmd = analysis.recommendation?.suggestedFfmpegCommand || '';
+    itemsInfo.push({
+      id: item.id,
+      title: item.title,
+      fileName: item.fileName,
+      filePath: item.filePath,
+      needsTranscode: analysis.needsTranscode,
+      command: cmd,
+    });
+
+    if (cmd) {
+      individualCmds.push(cmd);
+    }
+    if (item.filePath) {
+      filePathsList.push(`"${item.filePath.replace(/"/g, '\\"')}"`);
+    }
+  });
+
+  // Single bulk ffmpeg command string chaining all commands sequentially
+  const bulkFfmpegCommand = individualCmds.length > 0
+    ? individualCmds.join(' && \\\n')
+    : '# No valid commands generated';
+
+  // Alternative bash array loop command for iterating over selected paths
+  const bashLoopCommand = filePathsList.length > 0
+    ? `files=(\n  ${filePathsList.join('\n  ')}\n)\n\nfor f in "\${files[@]}"; do\n  echo "Processing: $f"\n  ffmpeg -fflags +genpts -i "$f" -c:v copy -c:a eac3 -b:a 768k -c:s copy "\${f%.*}.optimized.mkv"\ndone`
+    : '';
+
+  return {
+    itemCount: selectedItems.length,
+    transcodeCount,
+    bulkFfmpegCommand,
+    bashLoopCommand,
+    items: itemsInfo,
+  };
+}
+

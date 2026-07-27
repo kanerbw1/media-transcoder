@@ -4,7 +4,7 @@ import fs from 'fs';
 import { exec } from 'child_process';
 import { createServer as createViteServer } from 'vite';
 import { AppConfig, MediaItem, NotificationLog, SystemInfo, StreamInfo } from './src/types';
-import { analyzeMediaForChromecast, DEFAULT_CHROMECAST_PROFILE } from './src/utils/chromecastSpecs';
+import { analyzeMediaForChromecast, generateBulkSelectedItemsCommand, DEFAULT_CHROMECAST_PROFILE } from './src/utils/chromecastSpecs';
 import { getProcessedInitialMedia } from './src/utils/mockMediaGenerator';
 
 const app = express();
@@ -383,6 +383,95 @@ app.post('/api/media/:id/rescan', async (req: Request, res: Response) => {
   saveMediaDatabaseToFile(mediaDatabase);
 
   res.json({ status: 'ok', item: updatedItem });
+});
+
+// Batch process multiple media files at once
+app.post('/api/media/batch-process', async (req: Request, res: Response) => {
+  const { itemIds, overwriteMap, selectedStreamsMap, executeOnServer } = req.body;
+
+  if (!Array.isArray(itemIds) || itemIds.length === 0) {
+    res.status(400).json({ error: 'itemIds array is required and must not be empty' });
+    return;
+  }
+
+  const selectedItems = mediaDatabase.filter((m) => itemIds.includes(m.id));
+
+  if (selectedItems.length === 0) {
+    res.status(404).json({ error: 'No matching media items found for provided itemIds' });
+    return;
+  }
+
+  const bulkResult = generateBulkSelectedItemsCommand(
+    selectedItems,
+    appConfig.chromecastProfile,
+    overwriteMap || {},
+    selectedStreamsMap || {}
+  );
+
+  let executionStatus = 'ready';
+  let executionLogs: string[] = [];
+
+  if (executeOnServer) {
+    executionLogs.push(`Initiating batch FFmpeg processing for ${selectedItems.length} selected files...`);
+    if (systemFfprobeAvailable) {
+      executionStatus = 'in_progress';
+      executionLogs.push(`FFmpeg binary detected on server host. Executing bulk command sequence in background...`);
+      exec(bulkResult.bulkFfmpegCommand, { maxBuffer: 10 * 1024 * 1024 }, (err, stdout) => {
+        if (err) {
+          console.error('Batch FFmpeg execution error:', err);
+        } else {
+          console.log('Batch FFmpeg completed successfully:', stdout);
+        }
+      });
+    } else {
+      executionStatus = 'simulated';
+      executionLogs.push(`FFmpeg binary not present on web container host. Bulk FFmpeg bash command generated successfully.`);
+    }
+
+    if (appConfig.ntfy.topic) {
+      const summaryLogItem: MediaItem = {
+        id: `batch-${Date.now()}`,
+        fileName: `${selectedItems.length}_selected_files.mkv`,
+        filePath: selectedItems.map((i) => i.filePath).slice(0, 3).join(', ') + (selectedItems.length > 3 ? '...' : ''),
+        directory: selectedItems[0]?.directory || '/media',
+        title: `Batch Transcode Job (${selectedItems.length} files)`,
+        mediaType: 'movie',
+        fileSizeBytes: selectedItems.reduce((acc, i) => acc + i.fileSizeBytes, 0),
+        durationSeconds: selectedItems.reduce((acc, i) => acc + (i.durationSeconds || 0), 0),
+        container: 'mkv',
+        addedAt: new Date().toISOString(),
+        lastScannedAt: new Date().toISOString(),
+        streams: [],
+        needsTranscode: bulkResult.transcodeCount > 0,
+        transcodeReasons: [
+          `Batch processing triggered for ${selectedItems.length} items (${bulkResult.transcodeCount} requiring conversion).`,
+        ],
+        recommendation: {
+          summary: `Bulk batch command generated for ${selectedItems.length} items.`,
+          targetContainer: 'mkv',
+          targetVideoCodec: 'copy',
+          targetAudioCodec: 'copy',
+          targetSubtitleAction: 'copy',
+          suggestedFfmpegCommand: bulkResult.bulkFfmpegCommand,
+          estimatedSpeed: 'Normal (Full encode)',
+        },
+      };
+
+      await dispatchNtfyNotification(summaryLogItem);
+      executionLogs.push(`Push notification alert dispatched to ntfy topic '${appConfig.ntfy.topic}'.`);
+    }
+  }
+
+  res.json({
+    status: 'ok',
+    itemCount: bulkResult.itemCount,
+    transcodeCount: bulkResult.transcodeCount,
+    bulkFfmpegCommand: bulkResult.bulkFfmpegCommand,
+    bashLoopCommand: bulkResult.bashLoopCommand,
+    items: bulkResult.items,
+    executionStatus,
+    executionLogs,
+  });
 });
 
 app.get('/api/logs', (req: Request, res: Response) => {

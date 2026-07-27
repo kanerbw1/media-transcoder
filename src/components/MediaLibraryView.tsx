@@ -19,9 +19,24 @@ import {
   Layers,
   Folder,
   RotateCw,
+  CheckSquare,
+  Square,
+  ListChecks,
+  Zap,
+  X,
+  FileCode,
+  Code,
+  Sparkles,
+  Download,
+  Languages,
 } from 'lucide-react';
 import { MediaItem, StreamInfo } from '../types';
-import { analyzeMediaForChromecast, generateBatchShowCommands, getFormattedStreamTitle } from '../utils/chromecastSpecs';
+import {
+  analyzeMediaForChromecast,
+  generateBatchShowCommands,
+  generateBulkSelectedItemsCommand,
+  getFormattedStreamTitle,
+} from '../utils/chromecastSpecs';
 
 interface MediaLibraryViewProps {
   mediaItems: MediaItem[];
@@ -75,6 +90,102 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({
   const [expandedShows, setExpandedShows] = useState<Record<string, boolean>>({});
   const [overwriteMap, setOverwriteMap] = useState<Record<string, boolean>>({});
   const [selectedStreamsMap, setSelectedStreamsMap] = useState<Record<string, number[]>>({});
+
+  // Batch Media Selection State
+  const [selectedItemIds, setSelectedItemIds] = useState<Record<string, boolean>>({});
+  const [isBulkModalOpen, setIsBulkModalOpen] = useState(false);
+  const [batchProcessing, setBatchProcessing] = useState(false);
+  const [batchResultLogs, setBatchResultLogs] = useState<string[] | null>(null);
+  const [activeTabInModal, setActiveTabInModal] = useState<'bulk' | 'loop' | 'list'>('bulk');
+
+  const toggleSelectItem = (id: string) => {
+    setSelectedItemIds((prev) => {
+      const next = { ...prev };
+      if (next[id]) {
+        delete next[id];
+      } else {
+        next[id] = true;
+      }
+      return next;
+    });
+  };
+
+  const handleToggleSelectAllVisible = (items: MediaItem[]) => {
+    const visibleIds = items.map((i) => i.id);
+    const areAllSelected = visibleIds.length > 0 && visibleIds.every((id) => !!selectedItemIds[id]);
+    setSelectedItemIds((prev) => {
+      const next = { ...prev };
+      if (areAllSelected) {
+        visibleIds.forEach((id) => delete next[id]);
+      } else {
+        visibleIds.forEach((id) => {
+          next[id] = true;
+        });
+      }
+      return next;
+    });
+  };
+
+  const handleToggleSelectShow = (episodes: MediaItem[]) => {
+    const epIds = episodes.map((e) => e.id);
+    const isShowSelected = epIds.length > 0 && epIds.every((id) => !!selectedItemIds[id]);
+    setSelectedItemIds((prev) => {
+      const next = { ...prev };
+      if (isShowSelected) {
+        epIds.forEach((id) => delete next[id]);
+      } else {
+        epIds.forEach((id) => {
+          next[id] = true;
+        });
+      }
+      return next;
+    });
+  };
+
+  const clearSelection = () => setSelectedItemIds({});
+
+  const handleSelectEnglishStreamsOnlyForBatch = (selectedItemsList: MediaItem[]) => {
+    setSelectedStreamsMap((prev) => {
+      const next = { ...prev };
+      selectedItemsList.forEach((item) => {
+        const indices = (item.streams || [])
+          .filter((s) => s.type === 'video' || (s.language && s.language.toLowerCase().includes('eng')))
+          .map((s) => s.index);
+        next[item.id] = indices;
+      });
+      return next;
+    });
+  };
+
+  const handleBackendBatchProcess = async (selectedItemsList: MediaItem[]) => {
+    if (selectedItemsList.length === 0) return;
+    setBatchProcessing(true);
+    setBatchResultLogs(['Initiating batch process on backend server...']);
+    try {
+      const itemIds = selectedItemsList.map((i) => i.id);
+      const res = await fetch('/api/media/batch-process', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          itemIds,
+          overwriteMap,
+          selectedStreamsMap,
+          executeOnServer: true,
+        }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setBatchResultLogs(data.executionLogs || ['Batch processing initiated successfully.']);
+      } else {
+        setBatchResultLogs([`Error: ${data.error || 'Failed to process batch'}`]);
+      }
+    } catch (err: any) {
+      console.error('Error in batch process:', err);
+      setBatchResultLogs([`Error connecting to server: ${err?.message || 'Network failure'}`]);
+    } finally {
+      setBatchProcessing(false);
+    }
+  };
 
   const getSelectedIndices = (id: string, streams?: StreamInfo[]): number[] => {
     if (selectedStreamsMap[id] !== undefined) {
@@ -244,8 +355,35 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({
 
   const totalEntriesCount = movieItems.length + tvShowGroups.length;
 
+  const selectedItemsList = mediaItems.filter((m) => !!selectedItemIds[m.id]);
+  const selectedCount = selectedItemsList.length;
+
+  const bulkResult = generateBulkSelectedItemsCommand(
+    selectedItemsList,
+    undefined,
+    overwriteMap,
+    selectedStreamsMap
+  );
+
+  const selectedTranscodeCount = bulkResult.transcodeCount;
+
+  const handleDownloadScript = () => {
+    const element = document.createElement('a');
+    const file = new Blob(
+      [
+        `#!/usr/bin/env bash\n# Bulk FFmpeg Transcode Script\n# Generated for ${selectedCount} selected media items\n\n${bulkResult.bulkFfmpegCommand}\n`,
+      ],
+      { type: 'text/plain' }
+    );
+    element.href = URL.createObjectURL(file);
+    element.download = `chromecast_bulk_batch_${Date.now()}.sh`;
+    document.body.appendChild(element);
+    element.click();
+    document.body.removeChild(element);
+  };
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 relative pb-28">
       {/* Top Controls & Metrics */}
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-slate-900/90 p-5 rounded-lg border border-slate-800 shadow-xl">
         <div className="flex flex-wrap items-center gap-3">
@@ -328,6 +466,60 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({
         </div>
       </div>
 
+      {/* Selection Sub-Bar */}
+      <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-900/90 px-5 py-3 rounded-lg border border-slate-800 shadow-lg text-xs font-mono">
+        <div className="flex flex-wrap items-center gap-3">
+          <label className="inline-flex items-center space-x-2 text-slate-200 hover:text-white cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={filteredItems.length > 0 && filteredItems.every((i) => !!selectedItemIds[i.id])}
+              onChange={() => handleToggleSelectAllVisible(filteredItems)}
+              className="w-4 h-4 rounded border-indigo-500/60 bg-slate-950 text-indigo-500 focus:ring-indigo-500 cursor-pointer accent-indigo-500"
+            />
+            <span className="font-bold">
+              {filteredItems.length > 0 && filteredItems.every((i) => !!selectedItemIds[i.id])
+                ? 'Deselect All Filtered'
+                : 'Select All Filtered'}{' '}
+              ({filteredItems.length})
+            </span>
+          </label>
+
+          {selectedCount > 0 && (
+            <span className="px-2.5 py-1 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 font-bold">
+              {selectedCount} Selected ({selectedTranscodeCount} Transcode Needed)
+            </span>
+          )}
+        </div>
+
+        {selectedCount > 0 && (
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={() => handleSelectEnglishStreamsOnlyForBatch(selectedItemsList)}
+              title="Filter selected media items audio and subtitle tracks to keep English only"
+              className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-indigo-300 rounded border border-slate-700 transition cursor-pointer font-sans text-xs flex items-center gap-1"
+            >
+              <Languages className="w-3.5 h-3.5 text-indigo-400" />
+              <span>Keep English Tracks Only</span>
+            </button>
+
+            <button
+              onClick={() => setIsBulkModalOpen(true)}
+              className="px-3 py-1 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded border border-indigo-400 transition cursor-pointer flex items-center gap-1.5"
+            >
+              <Terminal className="w-3.5 h-3.5" />
+              <span>Bulk FFmpeg Command ({selectedCount})</span>
+            </button>
+
+            <button
+              onClick={clearSelection}
+              className="px-2 py-1 text-slate-400 hover:text-white underline cursor-pointer"
+            >
+              Clear Selection
+            </button>
+          </div>
+        )}
+      </div>
+
       {/* Main List */}
       <div className="space-y-4">
         {totalEntriesCount === 0 ? (
@@ -361,8 +553,17 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({
                     className="p-4 sm:p-5 flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800/80 cursor-pointer hover:bg-slate-800/40 transition select-none"
                   >
                     <div className="flex items-center space-x-3.5">
-                      <div className="p-2.5 rounded bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 shrink-0">
-                        <Tv className="w-6 h-6" />
+                      <div className="flex items-center gap-2.5 shrink-0" onClick={(e) => e.stopPropagation()}>
+                        <input
+                          type="checkbox"
+                          checked={group.episodes.length > 0 && group.episodes.every((ep) => !!selectedItemIds[ep.id])}
+                          onChange={() => handleToggleSelectShow(group.episodes)}
+                          title="Select/Deselect all episodes in this show for batch processing"
+                          className="w-4 h-4 rounded border-indigo-500/60 bg-slate-950 text-indigo-500 focus:ring-indigo-500 cursor-pointer accent-indigo-500"
+                        />
+                        <div className="p-2.5 rounded bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 shrink-0">
+                          <Tv className="w-6 h-6" />
+                        </div>
                       </div>
 
                       <div>
@@ -603,14 +804,23 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({
                             {/* Episode Header Strip */}
                             <div className="p-4 flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-slate-800/80">
                               <div className="flex items-start space-x-3">
-                                <div
-                                  className={`p-2 rounded shrink-0 ${
-                                    item.needsTranscode
-                                      ? 'bg-amber-500/10 text-amber-400 border border-amber-500/30'
-                                      : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30'
-                                  }`}
-                                >
-                                  <Tv className="w-4 h-4" />
+                                <div className="flex items-center gap-2 pt-0.5 shrink-0">
+                                  <input
+                                    type="checkbox"
+                                    checked={!!selectedItemIds[item.id]}
+                                    onChange={() => toggleSelectItem(item.id)}
+                                    title="Select episode for batch processing"
+                                    className="w-4 h-4 rounded border-indigo-500/60 bg-slate-950 text-indigo-500 focus:ring-indigo-500 cursor-pointer accent-indigo-500"
+                                  />
+                                  <div
+                                    className={`p-2 rounded shrink-0 ${
+                                      item.needsTranscode
+                                        ? 'bg-amber-500/10 text-amber-400 border border-amber-500/30'
+                                        : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30'
+                                    }`}
+                                  >
+                                    <Tv className="w-4 h-4" />
+                                  </div>
                                 </div>
 
                                 <div>
@@ -1013,14 +1223,23 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({
                   {/* Header Strip */}
                   <div className="p-4 sm:p-5 flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800/80">
                     <div className="flex items-start space-x-3.5">
-                      <div
-                        className={`p-2.5 rounded shrink-0 ${
-                          item.needsTranscode
-                            ? 'bg-amber-500/10 text-amber-400 border border-amber-500/30'
-                            : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30'
-                        }`}
-                      >
-                        <Film className="w-5 h-5" />
+                      <div className="flex items-center gap-2.5 pt-0.5 shrink-0">
+                        <input
+                          type="checkbox"
+                          checked={!!selectedItemIds[item.id]}
+                          onChange={() => toggleSelectItem(item.id)}
+                          title="Select movie for batch processing"
+                          className="w-4 h-4 rounded border-indigo-500/60 bg-slate-950 text-indigo-500 focus:ring-indigo-500 cursor-pointer accent-indigo-500"
+                        />
+                        <div
+                          className={`p-2.5 rounded shrink-0 ${
+                            item.needsTranscode
+                              ? 'bg-amber-500/10 text-amber-400 border border-amber-500/30'
+                              : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30'
+                          }`}
+                        >
+                          <Film className="w-5 h-5" />
+                        </div>
                       </div>
 
                       <div>
@@ -1391,6 +1610,327 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({
           </>
         )}
       </div>
+
+      {/* Floating Bottom Batch Bar */}
+      {selectedCount > 0 && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 w-full max-w-4xl px-4 animate-in fade-in slide-in-from-bottom-4 duration-200">
+          <div className="bg-slate-950/95 backdrop-blur-md border border-indigo-500/50 p-4 rounded-xl shadow-2xl shadow-indigo-950/80 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex items-center space-x-3">
+              <div className="p-2.5 rounded-lg bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 shrink-0">
+                <ListChecks className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-bold text-white font-mono">
+                    {selectedCount} {selectedCount === 1 ? 'item' : 'items'} selected for batching
+                  </span>
+                  {selectedTranscodeCount > 0 ? (
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded font-bold uppercase tracking-wider bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                      ⚠️ {selectedTranscodeCount} Needs Transcode
+                    </span>
+                  ) : (
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded font-bold uppercase tracking-wider bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                      ✅ Direct Play
+                    </span>
+                  )}
+                </div>
+                <p className="text-[11px] text-slate-400 font-mono mt-0.5">
+                  Single bulk FFmpeg command ready to copy or execute
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                onClick={() => handleCopyCommand(bulkResult.bulkFfmpegCommand, 'bulk-bar-copy')}
+                className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-indigo-300 font-mono text-xs font-bold rounded-lg border border-slate-700 transition cursor-pointer flex items-center gap-1.5 shadow"
+              >
+                {copiedId === 'bulk-bar-copy' ? (
+                  <>
+                    <Check className="w-4 h-4 text-emerald-400" />
+                    <span>Copied Bulk Command!</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-4 h-4" />
+                    <span>Copy Bulk FFmpeg</span>
+                  </>
+                )}
+              </button>
+
+              <button
+                onClick={() => handleBackendBatchProcess(selectedItemsList)}
+                disabled={batchProcessing}
+                className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-mono text-xs font-bold rounded-lg border border-indigo-400 transition cursor-pointer flex items-center gap-1.5 shadow disabled:opacity-50"
+              >
+                <Zap className="w-4 h-4 text-amber-300" />
+                <span>{batchProcessing ? 'Processing...' : 'Run on Backend'}</span>
+              </button>
+
+              <button
+                onClick={() => setIsBulkModalOpen(true)}
+                className="px-3 py-2 bg-slate-900 hover:bg-slate-800 text-slate-300 font-mono text-xs font-semibold rounded-lg border border-slate-800 transition cursor-pointer flex items-center gap-1.5"
+              >
+                <Terminal className="w-4 h-4 text-indigo-400" />
+                <span>View Command</span>
+              </button>
+
+              <button
+                onClick={clearSelection}
+                title="Clear all selected items"
+                className="p-2 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800/80 transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk FFmpeg Command Modal */}
+      {isBulkModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-4xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden animate-in zoom-in-95 duration-150">
+            {/* Modal Header */}
+            <div className="p-5 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
+              <div className="flex items-center space-x-3">
+                <div className="p-2 rounded-lg bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">
+                  <Terminal className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white font-mono flex items-center gap-2">
+                    Bulk FFmpeg Command Generator
+                    <span className="text-xs px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 font-normal">
+                      {selectedCount} files selected
+                    </span>
+                  </h3>
+                  <p className="text-xs text-slate-400 font-mono mt-0.5">
+                    Consolidated sequential FFmpeg execution string and bash script options
+                  </p>
+                </div>
+              </div>
+
+              <button
+                onClick={() => setIsBulkModalOpen(false)}
+                className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6 space-y-5 overflow-y-auto font-mono text-xs">
+              {/* Tab Selector */}
+              <div className="flex items-center space-x-2 border-b border-slate-800 pb-3">
+                <button
+                  onClick={() => setActiveTabInModal('bulk')}
+                  className={`px-3.5 py-1.5 rounded-lg font-bold transition cursor-pointer flex items-center gap-2 ${
+                    activeTabInModal === 'bulk'
+                      ? 'bg-indigo-600 text-white shadow'
+                      : 'bg-slate-950 text-slate-400 hover:text-white border border-slate-800'
+                  }`}
+                >
+                  <Code className="w-4 h-4" />
+                  <span>Single Bulk Command</span>
+                </button>
+
+                <button
+                  onClick={() => setActiveTabInModal('loop')}
+                  className={`px-3.5 py-1.5 rounded-lg font-bold transition cursor-pointer flex items-center gap-2 ${
+                    activeTabInModal === 'loop'
+                      ? 'bg-indigo-600 text-white shadow'
+                      : 'bg-slate-950 text-slate-400 hover:text-white border border-slate-800'
+                  }`}
+                >
+                  <FileCode className="w-4 h-4" />
+                  <span>Bash Array Loop</span>
+                </button>
+
+                <button
+                  onClick={() => setActiveTabInModal('list')}
+                  className={`px-3.5 py-1.5 rounded-lg font-bold transition cursor-pointer flex items-center gap-2 ${
+                    activeTabInModal === 'list'
+                      ? 'bg-indigo-600 text-white shadow'
+                      : 'bg-slate-950 text-slate-400 hover:text-white border border-slate-800'
+                  }`}
+                >
+                  <ListChecks className="w-4 h-4" />
+                  <span>Selected Items Breakdown ({selectedCount})</span>
+                </button>
+              </div>
+
+              {/* Tab 1: Single Bulk Command */}
+              {activeTabInModal === 'bulk' && (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-300 font-bold uppercase tracking-wider text-[11px]">
+                      Sequential Execution String (Chained with &&):
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={handleDownloadScript}
+                        className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-indigo-300 rounded border border-slate-700 transition cursor-pointer flex items-center gap-1.5 text-[11px]"
+                      >
+                        <Download className="w-3.5 h-3.5" />
+                        <span>Save as .sh file</span>
+                      </button>
+
+                      <button
+                        onClick={() => handleCopyCommand(bulkResult.bulkFfmpegCommand, 'modal-bulk-copy')}
+                        className="px-3 py-1 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded transition cursor-pointer flex items-center gap-1.5 text-[11px]"
+                      >
+                        {copiedId === 'modal-bulk-copy' ? (
+                          <>
+                            <Check className="w-3.5 h-3.5 text-emerald-400" />
+                            <span>Copied!</span>
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="w-3.5 h-3.5" />
+                            <span>Copy Command String</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+
+                  <pre
+                    onClick={() => handleCopyCommand(bulkResult.bulkFfmpegCommand, 'modal-bulk-copy')}
+                    className="p-4 bg-slate-950 text-emerald-400 rounded-xl border border-slate-800 overflow-x-auto leading-relaxed cursor-pointer select-all font-mono text-[11px] shadow-inner"
+                  >
+                    {bulkResult.bulkFfmpegCommand}
+                  </pre>
+                </div>
+              )}
+
+              {/* Tab 2: Bash Array Loop */}
+              {activeTabInModal === 'loop' && (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-300 font-bold uppercase tracking-wider text-[11px]">
+                      Bash Script Iteration Loop:
+                    </span>
+                    <button
+                      onClick={() => handleCopyCommand(bulkResult.bashLoopCommand, 'modal-loop-copy')}
+                      className="px-3 py-1 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded transition cursor-pointer flex items-center gap-1.5 text-[11px]"
+                    >
+                      {copiedId === 'modal-loop-copy' ? (
+                        <>
+                          <Check className="w-3.5 h-3.5 text-emerald-400" />
+                          <span>Copied Loop Script!</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3.5 h-3.5" />
+                          <span>Copy Bash Loop</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+
+                  <pre
+                    onClick={() => handleCopyCommand(bulkResult.bashLoopCommand, 'modal-loop-copy')}
+                    className="p-4 bg-slate-950 text-emerald-400 rounded-xl border border-slate-800 overflow-x-auto leading-relaxed cursor-pointer select-all font-mono text-[11px] shadow-inner"
+                  >
+                    {bulkResult.bashLoopCommand}
+                  </pre>
+                </div>
+              )}
+
+              {/* Tab 3: Breakdown list */}
+              {activeTabInModal === 'list' && (
+                <div className="space-y-3">
+                  <span className="text-slate-300 font-bold uppercase tracking-wider text-[11px]">
+                    Included Files & Individual Commands:
+                  </span>
+                  <div className="space-y-2 max-h-96 overflow-y-auto pr-1">
+                    {bulkResult.items.map((bItem, idx) => (
+                      <div key={bItem.id || idx} className="p-3 bg-slate-950 border border-slate-800 rounded-lg space-y-1.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className="text-slate-400 text-[10px]">#{idx + 1}</span>
+                            <span className="font-bold text-white truncate">{bItem.title}</span>
+                            <span
+                              className={`px-2 py-0.5 text-[9px] rounded font-bold uppercase ${
+                                bItem.needsTranscode
+                                  ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                                  : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                              }`}
+                            >
+                              {bItem.needsTranscode ? 'Transcode Needed' : 'Direct Play'}
+                            </span>
+                          </div>
+
+                          <button
+                            onClick={() => handleCopyCommand(bItem.command, `item-cmd-${idx}`)}
+                            className="px-2 py-0.5 text-[10px] bg-slate-800 hover:bg-slate-700 text-indigo-300 border border-slate-700 rounded font-mono"
+                          >
+                            {copiedId === `item-cmd-${idx}` ? 'Copied' : 'Copy'}
+                          </button>
+                        </div>
+                        <p className="text-[10px] text-slate-500 truncate">{bItem.filePath}</p>
+                        <pre className="p-2 bg-slate-900 text-emerald-400/90 text-[10px] rounded overflow-x-auto">
+                          {bItem.command}
+                        </pre>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Backend Logs Section */}
+              {batchResultLogs && (
+                <div className="p-4 bg-slate-950 border border-indigo-500/30 rounded-xl space-y-2">
+                  <div className="flex items-center justify-between text-indigo-300 font-bold text-[11px] uppercase tracking-wider">
+                    <span>Backend Execution Response:</span>
+                    <button
+                      onClick={() => setBatchResultLogs(null)}
+                      className="text-slate-500 hover:text-slate-300 text-[10px] underline"
+                    >
+                      Clear Logs
+                    </button>
+                  </div>
+                  <div className="space-y-1 text-[11px] text-slate-300 font-mono">
+                    {batchResultLogs.map((log, lIdx) => (
+                      <div key={lIdx} className="flex items-start gap-1.5">
+                        <span className="text-indigo-400">•</span>
+                        <span>{log}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 bg-slate-950 border-t border-slate-800 flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center space-x-2 text-slate-400 text-xs">
+                <span>{selectedCount} files selected</span>
+                <span>•</span>
+                <span>{selectedTranscodeCount} requiring conversion</span>
+              </div>
+
+              <div className="flex items-center space-x-3">
+                <button
+                  onClick={() => handleBackendBatchProcess(selectedItemsList)}
+                  disabled={batchProcessing}
+                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-mono text-xs font-bold rounded-lg transition cursor-pointer flex items-center gap-1.5 shadow disabled:opacity-50"
+                >
+                  <Zap className="w-4 h-4 text-amber-300" />
+                  <span>{batchProcessing ? 'Executing Batch...' : 'Run Batch on Backend'}</span>
+                </button>
+
+                <button
+                  onClick={() => setIsBulkModalOpen(false)}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 font-mono text-xs font-semibold rounded-lg transition cursor-pointer"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
