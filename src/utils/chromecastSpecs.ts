@@ -407,15 +407,22 @@ export function analyzeMediaForChromecast(
     }
   });
 
+  let hasBitmapSubs = false;
+  let hasTextSubs = false;
+
   // 4. Subtitle Stream Analysis
   subtitleStreams.forEach((sub, idx) => {
     const sCodec = (sub.codec || '').toLowerCase();
     if (sCodec.includes('pgs') || sCodec.includes('hdmv') || sCodec.includes('sup') || sCodec.includes('vobsub') || sCodec.includes('dvd_subtitle')) {
       subtitleNeedsExtraction = true;
+      hasBitmapSubs = true;
       reasons.push(`Bitmap subtitle stream #${idx + 1} (${sCodec.toUpperCase()}) forces Jellyfin to perform full video burn-in transcoding.`);
     } else if (sCodec.includes('ass') || sCodec.includes('ssa')) {
       subtitleNeedsExtraction = true;
+      hasTextSubs = true;
       reasons.push(`Styled ASS/SSA subtitle stream #${idx + 1} will force video burn-in transcoding on Chromecast unless converted to SRT.`);
+    } else if (sCodec.includes('subrip') || sCodec.includes('srt') || sCodec.includes('vtt') || sCodec.includes('text')) {
+      hasTextSubs = true;
     }
   });
 
@@ -479,36 +486,72 @@ export function analyzeMediaForChromecast(
   if (subtitleNeedsExtraction && !videoNeedsReencode && !audioNeedsReencode) {
     const keepCmd = formatCmd(`ffmpeg ${yFlag}-fflags +genpts -i ${inputPath} ${vCmd} ${aCmd} ${sCmd} ${mapFlags} ${outputPath}`);
     const stripCmd = formatCmd(`ffmpeg ${yFlag}-fflags +genpts -i ${inputPath} ${vCmd} ${aCmd} -sn ${mapFlags} ${outputPath}`);
-    const srtCmd = `ffmpeg -fflags +genpts -i ${inputPath} -map 0:s:0 "${dirName}/${nameWithoutExt}.en.srt"`;
-    const remuxPlusSrtCmd = `${keepCmd} && ffmpeg -fflags +genpts -y -i ${inputPath} -map 0:s:0 "${dirName}/${nameWithoutExt}.en.srt"`;
 
-    commandOptions.push({
-      id: 'remux-plus-srt',
-      label: 'Option 1: Remux MKV & Save Subtitles as External .SRT File',
-      command: remuxPlusSrtCmd,
-      note: 'Copies video and audio instantly while saving the subtitle track into a separate external .srt file for direct playback on Chromecast without video burn-in.',
-      recommended: true,
-    });
-    commandOptions.push({
-      id: 'strip-subs',
-      label: 'Option 2: Strip Subtitles (-sn) for 100% Direct Play',
-      command: stripCmd,
-      note: 'Strips subtitle streams completely with -sn. Resolves the PGS burn-in notice upon rescan and guarantees 100% Direct Play on Chromecast.',
-      recommended: false,
-    });
-    commandOptions.push({
-      id: 'keep-subs-remux',
-      label: 'Option 3: Remux & Keep Subtitles (-c:s copy)',
-      command: keepCmd,
-      note: langNote ? `${langNote} Preserves selected subtitle tracks.` : 'Preserves selected video, audio, and subtitle tracks in MKV. (Note: Retains PGS/bitmap subtitles inside the file. Rescanning will still report PGS subtitles present).',
-    });
-    commandOptions.push({
-      id: 'extract-srt-only',
-      label: 'Option 4: Extract Subtitles as External .SRT File Only (No Remux)',
-      command: srtCmd,
-      note: 'Extracts the subtitle track into a separate external .srt file without touching or re-processing the original video file.',
-    });
-    suggestedFfmpegCommand = remuxPlusSrtCmd;
+    if (hasBitmapSubs) {
+      // Bitmap subtitles (PGS, SUP, VobSub) cannot be directly exported to .srt by FFmpeg without OCR
+      const supCmd = `ffmpeg -fflags +genpts -i ${inputPath} -map 0:s:0 -c:s copy "${dirName}/${nameWithoutExt}.en.sup"`;
+      const remuxPlusSupCmd = `${keepCmd} && ffmpeg -fflags +genpts -y -i ${inputPath} -map 0:s:0 -c:s copy "${dirName}/${nameWithoutExt}.en.sup"`;
+
+      commandOptions.push({
+        id: 'remux-plus-sup',
+        label: 'Option 1: Remux MKV & Save Subtitles as External .SUP Bitmap File',
+        command: remuxPlusSupCmd,
+        note: 'Copies video and audio instantly while extracting the raw PGS bitmap subtitle track into a separate external .sup file. (Note: PGS subtitles are image graphics, so FFmpeg cannot convert them to text .srt without OCR software).',
+        recommended: true,
+      });
+      commandOptions.push({
+        id: 'strip-subs',
+        label: 'Option 2: Strip Bitmap Subtitles (-sn) for 100% Direct Play',
+        command: stripCmd,
+        note: 'Strips bitmap subtitles completely with -sn to guarantee 100% Direct Play on Chromecast without video burn-in transcode. Use Bazarr or OpenSubtitles to fetch a text .srt file.',
+        recommended: false,
+      });
+      commandOptions.push({
+        id: 'keep-subs-remux',
+        label: 'Option 3: Remux & Keep Subtitles (-c:s copy)',
+        command: keepCmd,
+        note: langNote ? `${langNote} Preserves selected subtitle tracks.` : 'Preserves selected video, audio, and subtitle tracks inside MKV. (100% Direct Play when subtitles are OFF in Jellyfin; turning PGS subtitles ON will trigger transcode).',
+      });
+      commandOptions.push({
+        id: 'extract-sup-only',
+        label: 'Option 4: Extract Subtitles as External .SUP File Only (No Remux)',
+        command: supCmd,
+        note: 'Extracts the raw bitmap subtitle track into a separate .sup file without touching or re-processing the original video file.',
+      });
+      suggestedFfmpegCommand = remuxPlusSupCmd;
+    } else {
+      // Text subtitles (ASS, SSA, SRT, VTT) can be safely extracted directly to .srt
+      const srtCmd = `ffmpeg -fflags +genpts -i ${inputPath} -map 0:s:0 "${dirName}/${nameWithoutExt}.en.srt"`;
+      const remuxPlusSrtCmd = `${keepCmd} && ffmpeg -fflags +genpts -y -i ${inputPath} -map 0:s:0 "${dirName}/${nameWithoutExt}.en.srt"`;
+
+      commandOptions.push({
+        id: 'remux-plus-srt',
+        label: 'Option 1: Remux MKV & Save Subtitles as External .SRT File',
+        command: remuxPlusSrtCmd,
+        note: 'Copies video and audio instantly while saving the text subtitle track into a separate external .srt file for direct playback on Chromecast without video burn-in.',
+        recommended: true,
+      });
+      commandOptions.push({
+        id: 'strip-subs',
+        label: 'Option 2: Strip Subtitles (-sn) for 100% Direct Play',
+        command: stripCmd,
+        note: 'Strips subtitle streams completely with -sn. Resolves burn-in notice upon rescan and guarantees 100% Direct Play on Chromecast.',
+        recommended: false,
+      });
+      commandOptions.push({
+        id: 'keep-subs-remux',
+        label: 'Option 3: Remux & Keep Subtitles (-c:s copy)',
+        command: keepCmd,
+        note: langNote ? `${langNote} Preserves selected subtitle tracks.` : 'Preserves selected video, audio, and subtitle tracks in MKV.',
+      });
+      commandOptions.push({
+        id: 'extract-srt-only',
+        label: 'Option 4: Extract Subtitles as External .SRT File Only (No Remux)',
+        command: srtCmd,
+        note: 'Extracts the subtitle track into a separate external .srt file without touching or re-processing the original video file.',
+      });
+      suggestedFfmpegCommand = remuxPlusSrtCmd;
+    }
   } else if (!videoNeedsReencode && audioNeedsReencode) {
     const remuxCmd = formatCmd(`ffmpeg ${yFlag}-fflags +genpts -i ${inputPath} -c:v copy ${aCmd} ${sCmd} ${mapFlags} ${outputPath}`);
     commandOptions.push({
