@@ -18,6 +18,7 @@ import {
   ChevronRight,
   Layers,
   Folder,
+  RotateCw,
 } from 'lucide-react';
 import { MediaItem } from '../types';
 import { analyzeMediaForChromecast, generateBatchShowCommands, isEnglishStream } from '../utils/chromecastSpecs';
@@ -27,6 +28,7 @@ interface MediaLibraryViewProps {
   onDispatchNtfy: (item: MediaItem) => Promise<void>;
   onScanTrigger: () => void;
   isScanning: boolean;
+  onRescanItem?: (itemId: string) => Promise<void>;
 }
 
 export function extractShowName(item: MediaItem): string {
@@ -63,14 +65,26 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({
   onDispatchNtfy,
   onScanTrigger,
   isScanning,
+  onRescanItem,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterType, setFilterType] = useState<'all' | 'needs_transcode' | 'direct_play' | 'movies' | 'tv'>('all');
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [sendingNtfyId, setSendingNtfyId] = useState<string | null>(null);
+  const [rescanningId, setRescanningId] = useState<string | null>(null);
   const [expandedShows, setExpandedShows] = useState<Record<string, boolean>>({});
   const [overwriteMap, setOverwriteMap] = useState<Record<string, boolean>>({});
   const [englishOnlyMap, setEnglishOnlyMap] = useState<Record<string, boolean>>({});
+
+  const handleRescanClick = async (itemId: string) => {
+    if (!onRescanItem) return;
+    setRescanningId(itemId);
+    try {
+      await onRescanItem(itemId);
+    } finally {
+      setRescanningId(null);
+    }
+  };
 
   const handleCopyCommand = async (command: string, id: string) => {
     let success = false;
@@ -547,6 +561,16 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({
 
                               {/* Right Actions */}
                               <div className="flex items-center space-x-2 shrink-0">
+                                <button
+                                  onClick={() => handleRescanClick(item.id)}
+                                  disabled={rescanningId === item.id || isScanning}
+                                  title="Rescan media file streams and update compatibility analysis"
+                                  className="inline-flex items-center px-2.5 py-1.5 text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded shadow transition cursor-pointer disabled:opacity-50 font-mono"
+                                >
+                                  <RotateCw className={`w-3.5 h-3.5 mr-1.5 text-indigo-400 ${rescanningId === item.id ? 'animate-spin' : ''}`} />
+                                  {rescanningId === item.id ? 'Rescanning...' : 'Rescan Entry'}
+                                </button>
+
                                 {item.needsTranscode && (
                                   <button
                                     onClick={() => handleSendNtfyClick(item)}
@@ -903,6 +927,16 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({
 
                     {/* Right Actions */}
                     <div className="flex items-center space-x-2 shrink-0">
+                      <button
+                        onClick={() => handleRescanClick(item.id)}
+                        disabled={rescanningId === item.id || isScanning}
+                        title="Rescan media file streams and update compatibility analysis"
+                        className="inline-flex items-center px-2.5 py-1.5 text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded shadow transition cursor-pointer disabled:opacity-50 font-mono"
+                      >
+                        <RotateCw className={`w-3.5 h-3.5 mr-1.5 text-indigo-400 ${rescanningId === item.id ? 'animate-spin' : ''}`} />
+                        {rescanningId === item.id ? 'Rescanning...' : 'Rescan Entry'}
+                      </button>
+
                       {item.needsTranscode && (
                         <button
                           onClick={() => handleSendNtfyClick(item)}

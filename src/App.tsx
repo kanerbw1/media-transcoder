@@ -113,6 +113,19 @@ export default function App() {
     }
   };
 
+  const handleRescanItem = async (itemId: string) => {
+    try {
+      const res = await fetch(`/api/media/${itemId}/rescan`, {
+        method: 'POST',
+      });
+      if (res.ok) {
+        await fetchData();
+      }
+    } catch (err) {
+      console.error('Failed to rescan media item:', err);
+    }
+  };
+
   const transcodeCount = mediaItems.filter((m) => m.needsTranscode).length;
 
   return (
@@ -138,6 +151,7 @@ export default function App() {
             onDispatchNtfy={handleDispatchNtfy}
             onScanTrigger={() => handleScanDirectories()}
             isScanning={isScanning}
+            onRescanItem={handleRescanItem}
           />
         )}
 

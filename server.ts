@@ -332,6 +332,59 @@ app.delete('/api/media/:id', (req: Request, res: Response) => {
   res.json({ status: 'ok', totalMediaCount: mediaDatabase.length });
 });
 
+app.post('/api/media/:id/rescan', async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const existingIdx = mediaDatabase.findIndex((m) => m.id === id);
+  if (existingIdx === -1) {
+    res.status(404).json({ error: 'Media item not found' });
+    return;
+  }
+
+  const existingItem = mediaDatabase[existingIdx];
+  const filePath = existingItem.filePath;
+
+  let updatedStreams = existingItem.streams;
+  let updatedDuration = existingItem.durationSeconds;
+  let updatedSize = existingItem.fileSizeBytes;
+
+  if (fs.existsSync(filePath)) {
+    try {
+      const stat = fs.statSync(filePath);
+      updatedSize = stat.size;
+      const probed = await probeMediaFile(filePath);
+      if (probed && probed.streams && probed.streams.length > 0) {
+        updatedStreams = probed.streams;
+        if (probed.durationSeconds) {
+          updatedDuration = probed.durationSeconds;
+        }
+      }
+    } catch (err) {
+      console.error(`Error probing file during rescan (${filePath}):`, err);
+    }
+  }
+
+  const inferredItem: Partial<MediaItem> = {
+    ...existingItem,
+    fileSizeBytes: updatedSize,
+    durationSeconds: updatedDuration,
+    streams: updatedStreams,
+    lastScannedAt: new Date().toISOString(),
+  };
+
+  const analysis = analyzeMediaForChromecast(inferredItem, appConfig.chromecastProfile);
+  const updatedItem: MediaItem = {
+    ...(inferredItem as MediaItem),
+    needsTranscode: analysis.needsTranscode,
+    transcodeReasons: analysis.reasons,
+    recommendation: analysis.recommendation,
+  };
+
+  mediaDatabase[existingIdx] = updatedItem;
+  saveMediaDatabaseToFile(mediaDatabase);
+
+  res.json({ status: 'ok', item: updatedItem });
+});
+
 app.get('/api/logs', (req: Request, res: Response) => {
   res.json(notificationLogs);
 });
