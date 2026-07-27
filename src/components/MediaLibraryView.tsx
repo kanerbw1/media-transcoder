@@ -21,7 +21,7 @@ import {
   RotateCw,
 } from 'lucide-react';
 import { MediaItem, StreamInfo } from '../types';
-import { analyzeMediaForChromecast, generateBatchShowCommands } from '../utils/chromecastSpecs';
+import { analyzeMediaForChromecast, generateBatchShowCommands, getFormattedStreamTitle } from '../utils/chromecastSpecs';
 
 interface MediaLibraryViewProps {
   mediaItems: MediaItem[];
@@ -493,7 +493,7 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({
                                             : 'bg-slate-900/50 border-slate-800 text-slate-500 opacity-60'
                                         }`}
                                       >
-                                        <div className="flex items-center gap-2 min-w-0 truncate">
+                                        <div className="flex items-center gap-2 min-w-0 truncate flex-1">
                                           <input
                                             type="checkbox"
                                             checked={isSelected}
@@ -501,9 +501,8 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({
                                             className="w-3.5 h-3.5 rounded border-indigo-700 bg-slate-950 text-indigo-500 focus:ring-indigo-500 cursor-pointer shrink-0"
                                           />
                                           <span className="truncate">
-                                            <span className="text-slate-400 font-bold">#{stream.index + 1} </span>
-                                            <span className="uppercase font-bold">{stream.type}: {stream.codec}</span>
-                                            {stream.title && <span className="text-slate-300 ml-1">("{stream.title}")</span>}
+                                            <span className="text-slate-400 font-bold">#{stream.index + 1}: </span>
+                                            <span className="font-medium text-slate-100">{getFormattedStreamTitle(stream)}</span>
                                           </span>
                                         </div>
                                         <span className="px-1.5 py-0.2 text-[9px] rounded font-bold uppercase bg-slate-900 border border-slate-700 ml-1 shrink-0">
@@ -765,16 +764,10 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({
                                                 className="w-3.5 h-3.5 rounded border-slate-700 bg-slate-950 text-emerald-500 focus:ring-emerald-500 cursor-pointer shrink-0"
                                               />
                                               <div className="min-w-0 truncate flex-1">
-                                                <span className="text-slate-400 font-bold">#{audio.index + 1} </span>
-                                                <strong className={`uppercase font-bold ${isSelected ? 'text-white' : 'text-slate-500 line-through'}`}>
-                                                  {audio.codec}
-                                                </strong>{' '}
-                                                <span className="text-slate-300">({audio.channels || 2}ch)</span>
-                                                {audio.title && (
-                                                  <span className={`ml-1 text-[10px] ${isSelected ? 'text-indigo-300 font-medium' : 'text-slate-600 line-through'}`}>
-                                                    "{audio.title}"
-                                                  </span>
-                                                )}
+                                                <span className="text-slate-400 font-bold">#{audio.index + 1}: </span>
+                                                <span className={`font-semibold ${isSelected ? 'text-white' : 'text-slate-500 line-through'}`}>
+                                                  {getFormattedStreamTitle(audio)}
+                                                </span>
                                               </div>
                                             </label>
                                             <div className="flex items-center gap-1 shrink-0 font-mono">
@@ -850,23 +843,10 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({
                                                 className="w-3.5 h-3.5 rounded border-slate-700 bg-slate-950 text-amber-500 focus:ring-amber-500 cursor-pointer shrink-0"
                                               />
                                               <div className="min-w-0 truncate flex-1">
-                                                <span className="text-slate-400 font-bold">#{sub.index + 1} </span>
-                                                <strong
-                                                  className={
-                                                    isSelected
-                                                      ? sub.codec.includes('pgs') || sub.codec.includes('ass')
-                                                        ? 'text-amber-400 uppercase font-bold'
-                                                        : 'text-slate-200 uppercase font-bold'
-                                                      : 'text-slate-500 uppercase line-through'
-                                                  }
-                                                >
-                                                  {sub.codec}
-                                                </strong>
-                                                {sub.title && (
-                                                  <span className={`ml-1 text-[10px] ${isSelected ? 'text-indigo-300 font-medium' : 'text-slate-600 line-through'}`}>
-                                                    "{sub.title}"
-                                                  </span>
-                                                )}
+                                                <span className="text-slate-400 font-bold">#{sub.index + 1}: </span>
+                                                <span className={`font-semibold ${isSelected ? 'text-amber-200' : 'text-slate-500 line-through'}`}>
+                                                  {getFormattedStreamTitle(sub)}
+                                                </span>
                                               </div>
                                             </label>
                                             <div className="flex items-center gap-1 shrink-0 font-mono">
@@ -1186,16 +1166,10 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({
                                       className="w-3.5 h-3.5 rounded border-slate-700 bg-slate-950 text-emerald-500 focus:ring-emerald-500 cursor-pointer shrink-0"
                                     />
                                     <div className="min-w-0 truncate flex-1">
-                                      <span className="text-slate-400 font-bold">#{audio.index + 1} </span>
-                                      <strong className={`uppercase font-bold ${isSelected ? 'text-white' : 'text-slate-500 line-through'}`}>
-                                        {audio.codec}
-                                      </strong>{' '}
-                                      <span className="text-slate-300">({audio.channels || 2}ch)</span>
-                                      {audio.title && (
-                                        <span className={`ml-1 text-[10px] ${isSelected ? 'text-indigo-300 font-medium' : 'text-slate-600 line-through'}`}>
-                                          "{audio.title}"
-                                        </span>
-                                      )}
+                                      <span className="text-slate-400 font-bold">#{audio.index + 1}: </span>
+                                      <span className={`font-semibold ${isSelected ? 'text-white' : 'text-slate-500 line-through'}`}>
+                                        {getFormattedStreamTitle(audio)}
+                                      </span>
                                     </div>
                                   </label>
                                   <div className="flex items-center gap-1 shrink-0 font-mono">
@@ -1269,23 +1243,10 @@ export const MediaLibraryView: React.FC<MediaLibraryViewProps> = ({
                                       className="w-3.5 h-3.5 rounded border-slate-700 bg-slate-950 text-amber-500 focus:ring-amber-500 cursor-pointer shrink-0"
                                     />
                                     <div className="min-w-0 truncate flex-1">
-                                      <span className="text-slate-400 font-bold">#{sub.index + 1} </span>
-                                      <strong
-                                        className={
-                                          isSelected
-                                            ? sub.codec.includes('pgs') || sub.codec.includes('ass')
-                                              ? 'text-amber-400 uppercase font-bold'
-                                              : 'text-slate-200 uppercase font-bold'
-                                            : 'text-slate-500 uppercase line-through'
-                                        }
-                                      >
-                                        {sub.codec}
-                                      </strong>
-                                      {sub.title && (
-                                        <span className={`ml-1 text-[10px] ${isSelected ? 'text-indigo-300 font-medium' : 'text-slate-600 line-through'}`}>
-                                          "{sub.title}"
-                                        </span>
-                                      )}
+                                      <span className="text-slate-400 font-bold">#{sub.index + 1}: </span>
+                                      <span className={`font-semibold ${isSelected ? 'text-amber-200' : 'text-slate-500 line-through'}`}>
+                                        {getFormattedStreamTitle(sub)}
+                                      </span>
                                     </div>
                                   </label>
                                   <div className="flex items-center gap-1 shrink-0 font-mono">

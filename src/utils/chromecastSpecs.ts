@@ -1,5 +1,232 @@
 import { MediaItem, ChromecastProfile, TranscodeRecommendation, StreamInfo } from '../types';
 
+export const ISO_LANGUAGES: Record<string, string> = {
+  eng: 'English',
+  en: 'English',
+  dan: 'Danish',
+  da: 'Danish',
+  swe: 'Swedish',
+  sv: 'Swedish',
+  nor: 'Norwegian',
+  nob: 'Norwegian',
+  nno: 'Norwegian',
+  no: 'Norwegian',
+  fin: 'Finnish',
+  fi: 'Finnish',
+  spa: 'Spanish',
+  es: 'Spanish',
+  fre: 'French',
+  fra: 'French',
+  fr: 'French',
+  ger: 'German',
+  deu: 'German',
+  de: 'German',
+  ita: 'Italian',
+  it: 'Italian',
+  jpn: 'Japanese',
+  ja: 'Japanese',
+  chi: 'Chinese',
+  zho: 'Chinese',
+  zh: 'Chinese',
+  rus: 'Russian',
+  ru: 'Russian',
+  por: 'Portuguese',
+  pt: 'Portuguese',
+  kor: 'Korean',
+  ko: 'Korean',
+  nld: 'Dutch',
+  dut: 'Dutch',
+  nl: 'Dutch',
+  pol: 'Polish',
+  pl: 'Polish',
+  ces: 'Czech',
+  cze: 'Czech',
+  cs: 'Czech',
+  hun: 'Hungarian',
+  hu: 'Hungarian',
+  gre: 'Greek',
+  ell: 'Greek',
+  el: 'Greek',
+  tur: 'Turkish',
+  tr: 'Turkish',
+  ara: 'Arabic',
+  ar: 'Arabic',
+  heb: 'Hebrew',
+  he: 'Hebrew',
+  hin: 'Hindi',
+  hi: 'Hindi',
+  tha: 'Thai',
+  th: 'Thai',
+  vie: 'Vietnamese',
+  vi: 'Vietnamese',
+  ind: 'Indonesian',
+  id: 'Indonesian',
+  ukr: 'Ukrainian',
+  uk: 'Ukrainian',
+  ron: 'Romanian',
+  rum: 'Romanian',
+  ro: 'Romanian',
+  bul: 'Bulgarian',
+  bg: 'Bulgarian',
+  hrv: 'Croatian',
+  hr: 'Croatian',
+  srp: 'Serbian',
+  sr: 'Serbian',
+  slv: 'Slovenian',
+  sl: 'Slovenian',
+  slk: 'Slovak',
+  slo: 'Slovak',
+  sk: 'Slovak',
+  cat: 'Catalan',
+  ca: 'Catalan',
+  eus: 'Basque',
+  baq: 'Basque',
+  eu: 'Basque',
+  glg: 'Galician',
+  gl: 'Galician',
+  und: 'Unknown',
+};
+
+export function getLanguageDisplayName(langCode?: string): string {
+  if (!langCode) return '';
+  const cleaned = langCode.trim().toLowerCase();
+  if (ISO_LANGUAGES[cleaned]) {
+    return ISO_LANGUAGES[cleaned];
+  }
+  if (cleaned.length > 3) {
+    return langCode.charAt(0).toUpperCase() + langCode.slice(1);
+  }
+  return langCode.toUpperCase();
+}
+
+export function getFriendlyCodecName(stream: StreamInfo): string {
+  const codec = (stream.codec || '').toLowerCase();
+  const codecLong = (stream.codecLong || '').toLowerCase();
+  const profile = (stream.profile || '').toLowerCase();
+  const title = (stream.title || '').toLowerCase();
+
+  if (stream.type === 'audio') {
+    if (codec === 'dts') {
+      if (codecLong.includes('master audio') || profile.includes('ma') || title.includes('ma') || codecLong.includes('dts-hd ma')) {
+        return 'DTS-HD MA';
+      }
+      if (codecLong.includes('high resolution') || profile.includes('hr') || title.includes('hr')) {
+        return 'DTS-HD HR';
+      }
+      if (codecLong.includes('dts-hd') || profile.includes('dts-hd') || title.includes('dts-hd')) {
+        return 'DTS-HD';
+      }
+      return 'DTS';
+    }
+    if (codec === 'ac3') {
+      return 'Dolby Digital';
+    }
+    if (codec === 'eac3') {
+      if (codecLong.includes('atmos') || title.includes('atmos')) {
+        return 'Dolby Digital Plus with Atmos';
+      }
+      return 'Dolby Digital Plus';
+    }
+    if (codec === 'truehd') {
+      if (codecLong.includes('atmos') || title.includes('atmos')) {
+        return 'Dolby TrueHD Atmos';
+      }
+      return 'Dolby TrueHD';
+    }
+    if (codec === 'aac') return 'AAC';
+    if (codec === 'flac') return 'FLAC';
+    if (codec === 'opus') return 'Opus';
+    if (codec === 'mp3') return 'MP3';
+    if (codec === 'vorbis') return 'Vorbis';
+    if (codec.startsWith('pcm')) return 'PCM';
+    return stream.codec.toUpperCase();
+  }
+
+  if (stream.type === 'subtitle') {
+    if (codec === 'subrip' || codec === 'srt') return 'SRT';
+    if (codec === 'ass' || codec === 'ssa') return 'ASS/SSA';
+    if (codec === 'pgs' || codec === 'hdmv_pgs_subtitle') return 'PGS';
+    if (codec === 'vtt' || codec === 'webvtt') return 'VTT';
+    if (codec === 'vobsub' || codec === 'dvd_subtitle') return 'VobSub';
+    return stream.codec.toUpperCase();
+  }
+
+  return stream.codec.toUpperCase();
+}
+
+export function getChannelLayoutDisplayName(stream: StreamInfo): string {
+  if (stream.channelLayout) {
+    const cl = stream.channelLayout.toLowerCase();
+    if (cl.includes('5.1')) return '5.1';
+    if (cl.includes('7.1')) return '7.1';
+    if (cl.includes('stereo')) return '2.0';
+    if (cl.includes('mono')) return '1.0';
+    return stream.channelLayout;
+  }
+  if (stream.channels) {
+    if (stream.channels === 8) return '7.1';
+    if (stream.channels === 6) return '5.1';
+    if (stream.channels === 2) return '2.0';
+    if (stream.channels === 1) return '1.0';
+    return `${stream.channels}ch`;
+  }
+  return '';
+}
+
+export function getFormattedStreamTitle(stream: StreamInfo): string {
+  const parts: string[] = [];
+
+  const lang = getLanguageDisplayName(stream.language);
+  const friendlyCodec = getFriendlyCodecName(stream);
+  const channels = getChannelLayoutDisplayName(stream);
+  const rawTitle = (stream.title || '').trim();
+
+  if (stream.type === 'audio') {
+    if (rawTitle) {
+      parts.push(rawTitle);
+    }
+    if (lang) {
+      parts.push(lang);
+    }
+    if (!rawTitle || !rawTitle.toLowerCase().includes(friendlyCodec.toLowerCase())) {
+      parts.push(friendlyCodec);
+    }
+    if (channels && !rawTitle.toLowerCase().includes(channels.toLowerCase())) {
+      parts.push(channels);
+    }
+  } else if (stream.type === 'subtitle') {
+    if (lang) {
+      parts.push(lang);
+    }
+    parts.push(friendlyCodec);
+    if (rawTitle && !rawTitle.toLowerCase().includes(friendlyCodec.toLowerCase())) {
+      parts.push(rawTitle);
+    }
+  } else {
+    if (lang) parts.push(lang);
+    parts.push(friendlyCodec);
+    if (stream.width && stream.height) {
+      parts.push(`${stream.width}x${stream.height}`);
+    }
+  }
+
+  if (stream.isDefault) {
+    parts.push('Default');
+  }
+  if (stream.isForced) {
+    parts.push('Forced');
+  }
+
+  const uniqueParts: string[] = [];
+  parts.forEach((p) => {
+    if (p && (!uniqueParts.length || uniqueParts[uniqueParts.length - 1].toLowerCase() !== p.toLowerCase())) {
+      uniqueParts.push(p);
+    }
+  });
+
+  return uniqueParts.join(' - ');
+}
+
 export const DEFAULT_CHROMECAST_PROFILE: ChromecastProfile = {
   name: 'Chromecast 4K with Google TV',
   allowH264: true,
