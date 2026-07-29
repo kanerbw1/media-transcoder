@@ -279,10 +279,20 @@ export function isEnglishStream(stream: StreamInfo): boolean {
 export function buildFfmpegMapFlags(
   item: Partial<MediaItem>,
   selectedStreamIndices?: number[]
-): { mapFlags: string; truncatedAudioCount: number; truncatedSubCount: number } {
+): {
+  mapFlags: string;
+  mapFlagsNoSubs: string;
+  truncatedAudioCount: number;
+  truncatedSubCount: number;
+} {
   const streams = item.streams || [];
   if (!selectedStreamIndices) {
-    return { mapFlags: '-map 0', truncatedAudioCount: 0, truncatedSubCount: 0 };
+    return {
+      mapFlags: '-map 0',
+      mapFlagsNoSubs: '-map "0:v?" -map "0:a?"',
+      truncatedAudioCount: 0,
+      truncatedSubCount: 0,
+    };
   }
 
   const selectedSet = new Set(selectedStreamIndices);
@@ -294,39 +304,45 @@ export function buildFfmpegMapFlags(
   const unselectedSub = subStreams.filter((s) => !selectedSet.has(s.index));
 
   const mapParts: string[] = [];
+  const mapPartsNoSubs: string[] = [];
 
   // Video
   if (videoStreams.length > 0) {
     let videoMapped = false;
     videoStreams.forEach((v) => {
       if (selectedSet.has(v.index)) {
-        mapParts.push(`-map 0:${v.index}`);
+        mapParts.push(`-map "0:${v.index}?"`);
+        mapPartsNoSubs.push(`-map "0:${v.index}?"`);
         videoMapped = true;
       }
     });
     if (!videoMapped) {
-      mapParts.push('-map 0:v');
+      mapParts.push('-map "0:v?"');
+      mapPartsNoSubs.push('-map "0:v?"');
     }
   } else {
-    mapParts.push('-map 0:v');
+    mapParts.push('-map "0:v?"');
+    mapPartsNoSubs.push('-map "0:v?"');
   }
 
-  // Audio
+  // Audio (Only map audio streams explicitly present in selectedSet)
   audioStreams.forEach((a) => {
     if (selectedSet.has(a.index)) {
-      mapParts.push(`-map 0:${a.index}`);
+      mapParts.push(`-map "0:${a.index}?"`);
+      mapPartsNoSubs.push(`-map "0:${a.index}?"`);
     }
   });
 
   // Subtitles
   subStreams.forEach((s) => {
     if (selectedSet.has(s.index)) {
-      mapParts.push(`-map 0:${s.index}`);
+      mapParts.push(`-map "0:${s.index}?"`);
     }
   });
 
   return {
     mapFlags: mapParts.length > 0 ? mapParts.join(' ') : '-map 0',
+    mapFlagsNoSubs: mapPartsNoSubs.length > 0 ? mapPartsNoSubs.join(' ') : '-map "0:v?" -map "0:a?"',
     truncatedAudioCount: unselectedAudio.length,
     truncatedSubCount: unselectedSub.length,
   };
@@ -342,9 +358,21 @@ export function analyzeMediaForChromecast(
   const streams = item.streams || [];
   const container = (item.container || '').toLowerCase().replace('.', '');
 
+  const selectedSet = selectedStreamIndices ? new Set(selectedStreamIndices) : null;
+
   const videoStreams = streams.filter((s) => s.type === 'video');
   const audioStreams = streams.filter((s) => s.type === 'audio');
   const subtitleStreams = streams.filter((s) => s.type === 'subtitle');
+
+  const activeVideoStreams = selectedSet
+    ? videoStreams.filter((s) => selectedSet.has(s.index))
+    : videoStreams;
+  const activeAudioStreams = selectedSet
+    ? audioStreams.filter((s) => selectedSet.has(s.index))
+    : audioStreams;
+  const activeSubtitleStreams = selectedSet
+    ? subtitleStreams.filter((s) => selectedSet.has(s.index))
+    : subtitleStreams;
 
   let videoNeedsReencode = false;
   let audioNeedsReencode = false;
@@ -359,16 +387,16 @@ export function analyzeMediaForChromecast(
   }
 
   // 2. Video Stream Analysis
-  if (videoStreams.length === 0) {
+  const videoToAnalyze = activeVideoStreams.length > 0 ? activeVideoStreams[0] : videoStreams[0];
+  if (!videoToAnalyze) {
     reasons.push('No video stream detected in file.');
   } else {
-    const mainVideo = videoStreams[0];
-    const codec = (mainVideo.codec || '').toLowerCase();
-    const pixFmt = (mainVideo.pixelFormat || '').toLowerCase();
-    const bitDepth = mainVideo.bitDepth || (pixFmt.includes('10le') || pixFmt.includes('p10') ? 10 : 8);
+    const codec = (videoToAnalyze.codec || '').toLowerCase();
+    const pixFmt = (videoToAnalyze.pixelFormat || '').toLowerCase();
+    const bitDepth = videoToAnalyze.bitDepth || (pixFmt.includes('10le') || pixFmt.includes('p10') ? 10 : 8);
 
     if (codec.includes('h264') || codec.includes('avc')) {
-      if (bitDepth > 8 || pixFmt.includes('10le') || pixFmt.includes('444') || mainVideo.profile?.toLowerCase().includes('high 10')) {
+      if (bitDepth > 8 || pixFmt.includes('10le') || pixFmt.includes('444') || videoToAnalyze.profile?.toLowerCase().includes('high 10')) {
         videoNeedsReencode = true;
         reasons.push(
           `H.264 10-Bit / High 10 profile (${pixFmt || '10-bit'}) detected. Chromecast 4K lacks 10-bit H.264 hardware decoding and will force Jellyfin to transcode.`
@@ -382,45 +410,44 @@ export function analyzeMediaForChromecast(
       }
     } else if (codec.includes('mpeg2') || codec.includes('mpeg4') || codec.includes('xvid') || codec.includes('divx') || codec.includes('vc1') || codec.includes('wmv')) {
       videoNeedsReencode = true;
-      reasons.push(`Legacy video codec '${mainVideo.codecLong || codec.toUpperCase()}' cannot be direct-played on Chromecast 4K.`);
+      reasons.push(`Legacy video codec '${videoToAnalyze.codecLong || codec.toUpperCase()}' cannot be direct-played on Chromecast 4K.`);
     }
   }
 
-  // 3. Audio Stream Analysis
-  audioStreams.forEach((audio, idx) => {
+  // 3. Audio Stream Analysis (Only check selected/active audio streams)
+  activeAudioStreams.forEach((audio) => {
     const aCodec = (audio.codec || '').toLowerCase();
-    const channels = audio.channels || 2;
 
     if (aCodec.includes('truehd') || aCodec.includes('atmos')) {
       if (!profile.allowTrueHDDirect) {
         audioNeedsReencode = true;
-        reasons.push(`Audio stream #${idx + 1} (${audio.codecLong || 'Dolby TrueHD'}) will trigger Jellyfin audio transcoding on Chromecast 4K.`);
+        reasons.push(`Audio stream #${audio.index} (${audio.codecLong || 'Dolby TrueHD'}) will trigger Jellyfin audio transcoding on Chromecast 4K.`);
       }
     } else if (aCodec.includes('dts') || aCodec.includes('ca71') || aCodec.includes('dca')) {
       if (!profile.allowDTSDirect) {
         audioNeedsReencode = true;
-        reasons.push(`Audio stream #${idx + 1} (${audio.codecLong || 'DTS / DTS-HD MA'}) triggers audio transcoding on Chromecast 4K.`);
+        reasons.push(`Audio stream #${audio.index} (${audio.codecLong || 'DTS / DTS-HD MA'}) triggers audio transcoding on Chromecast 4K.`);
       }
     } else if (aCodec.includes('pcm') || aCodec.includes('lpcm') || aCodec.includes('wma') || aCodec.includes('vorbis')) {
       audioNeedsReencode = true;
-      reasons.push(`Uncompressed / unhandled audio format '${aCodec.toUpperCase()}' on stream #${idx + 1} requires audio conversion.`);
+      reasons.push(`Uncompressed / unhandled audio format '${aCodec.toUpperCase()}' on stream #${audio.index} requires audio conversion.`);
     }
   });
 
   let hasBitmapSubs = false;
   let hasTextSubs = false;
 
-  // 4. Subtitle Stream Analysis
-  subtitleStreams.forEach((sub, idx) => {
+  // 4. Subtitle Stream Analysis (Only check selected/active subtitle streams)
+  activeSubtitleStreams.forEach((sub) => {
     const sCodec = (sub.codec || '').toLowerCase();
     if (sCodec.includes('pgs') || sCodec.includes('hdmv') || sCodec.includes('sup') || sCodec.includes('vobsub') || sCodec.includes('dvd_subtitle')) {
       subtitleNeedsExtraction = true;
       hasBitmapSubs = true;
-      reasons.push(`Bitmap subtitle stream #${idx + 1} (${sCodec.toUpperCase()}) forces Jellyfin to perform full video burn-in transcoding.`);
+      reasons.push(`Bitmap subtitle stream #${sub.index} (${sCodec.toUpperCase()}) forces Jellyfin to perform full video burn-in transcoding.`);
     } else if (sCodec.includes('ass') || sCodec.includes('ssa')) {
       subtitleNeedsExtraction = true;
       hasTextSubs = true;
-      reasons.push(`Styled ASS/SSA subtitle stream #${idx + 1} will force video burn-in transcoding on Chromecast unless converted to SRT.`);
+      reasons.push(`Styled ASS/SSA subtitle stream #${sub.index} will force video burn-in transcoding on Chromecast unless converted to SRT.`);
     } else if (sCodec.includes('subrip') || sCodec.includes('srt') || sCodec.includes('vtt') || sCodec.includes('text')) {
       hasTextSubs = true;
     }
@@ -463,7 +490,15 @@ export function analyzeMediaForChromecast(
     sCmd = '-c:s copy';
   }
 
-  const { mapFlags, truncatedAudioCount, truncatedSubCount } = buildFfmpegMapFlags(item, selectedStreamIndices);
+  const { mapFlags, mapFlagsNoSubs, truncatedAudioCount, truncatedSubCount } = buildFfmpegMapFlags(item, selectedStreamIndices);
+
+  // Determine target subtitle stream for external extraction
+  const selectedSubStreams = subtitleStreams.filter((s) =>
+    selectedStreamIndices ? selectedStreamIndices.includes(s.index) : false
+  );
+  const targetSubStream = selectedSubStreams.length > 0 ? selectedSubStreams[0] : subtitleStreams[0];
+  const subTypeIndex = targetSubStream ? Math.max(0, subtitleStreams.indexOf(targetSubStream)) : 0;
+  const subMapFlag = targetSubStream ? `-map "0:s:${subTypeIndex}?"` : '-map "0:s:0?"';
 
   // Construct shell command
   const inputPath = `"${rawPath}"`;
@@ -485,25 +520,26 @@ export function analyzeMediaForChromecast(
 
   if (subtitleNeedsExtraction && !videoNeedsReencode && !audioNeedsReencode) {
     const keepCmd = formatCmd(`ffmpeg ${yFlag}-fflags +genpts -i ${inputPath} ${vCmd} ${aCmd} ${sCmd} ${mapFlags} ${outputPath}`);
-    const stripCmd = formatCmd(`ffmpeg ${yFlag}-fflags +genpts -i ${inputPath} ${vCmd} ${aCmd} -sn ${mapFlags} ${outputPath}`);
+    const stripCmd = formatCmd(`ffmpeg ${yFlag}-fflags +genpts -i ${inputPath} ${vCmd} ${aCmd} -sn ${mapFlagsNoSubs} ${outputPath}`);
 
     if (hasBitmapSubs) {
-      // Bitmap subtitles (PGS, SUP, VobSub) cannot be directly exported to .srt by FFmpeg without OCR
-      const supCmd = `ffmpeg -y -fflags +genpts -i ${inputPath} -map 0:s:0 -c:s copy "${dirName}/${nameWithoutExt}.en.sup"`;
-      const remuxPlusSupCmd = `${supCmd} && ${stripCmd}`;
+      // Bitmap subtitles (PGS, SUP, VobSub) cannot be directly exported to raw .sup by FFmpeg without elementary header errors.
+      // Instead, extract to a sidecar .pgs.mkv container or strip embedded bitmap subs (-sn) for Direct Play.
+      const sidecarPgsCmd = `ffmpeg -y -fflags +genpts -i ${inputPath} ${subMapFlag} -c:s copy "${dirName}/${nameWithoutExt}.en.pgs.mkv"`;
+      const remuxPlusPgsCmd = `${sidecarPgsCmd} && ${stripCmd}`;
 
       commandOptions.push({
-        id: 'remux-plus-sup',
-        label: 'Option 1: Remux MKV & Save Subtitles as External .SUP Bitmap File',
-        command: remuxPlusSupCmd,
-        note: 'Extracts the PGS subtitle track into an external .sup file FIRST, then remuxes the MKV with -sn to strip embedded PGS subtitles from the video file. Guarantees 100% Direct Play on Chromecast without video burn-in.',
+        id: 'strip-subs',
+        label: 'Option 1: Strip Bitmap Subtitles (-sn) for 100% Direct Play (Recommended)',
+        command: stripCmd,
+        note: 'Strips bitmap PGS subtitles completely with -sn to guarantee 100% Direct Play on Chromecast 4K without video burn-in transcode. Use Bazarr or OpenSubtitles to fetch clean text .srt files.',
         recommended: true,
       });
       commandOptions.push({
-        id: 'strip-subs',
-        label: 'Option 2: Strip Bitmap Subtitles (-sn) for 100% Direct Play',
-        command: stripCmd,
-        note: 'Strips bitmap subtitles completely with -sn to guarantee 100% Direct Play on Chromecast without video burn-in transcode. Use Bazarr or OpenSubtitles to fetch a text .srt file.',
+        id: 'remux-plus-pgs',
+        label: 'Option 2: Remux MKV & Save PGS Subtitles as External Sidecar (.pgs.mkv)',
+        command: remuxPlusPgsCmd,
+        note: 'Extracts the PGS subtitle track into a sidecar .pgs.mkv container FIRST (preventing raw .sup FFmpeg packet errors), then remuxes the MKV with -sn to strip embedded PGS subtitles.',
         recommended: false,
       });
       commandOptions.push({
@@ -513,15 +549,15 @@ export function analyzeMediaForChromecast(
         note: langNote ? `${langNote} Preserves selected subtitle tracks.` : 'Preserves selected video, audio, and subtitle tracks inside MKV. (Note: Keeps PGS subtitles embedded in MKV. Turning PGS subtitles ON in Jellyfin will trigger transcode).',
       });
       commandOptions.push({
-        id: 'extract-sup-only',
-        label: 'Option 4: Extract Subtitles as External .SUP File Only (No Remux)',
-        command: supCmd,
-        note: 'Extracts the raw bitmap subtitle track into a separate .sup file without touching or re-processing the original video file.',
+        id: 'extract-pgs-only',
+        label: 'Option 4: Extract Subtitles as External Sidecar .pgs.mkv File Only',
+        command: sidecarPgsCmd,
+        note: 'Extracts the bitmap subtitle track into a separate .pgs.mkv sidecar container without touching the original video file.',
       });
-      suggestedFfmpegCommand = remuxPlusSupCmd;
+      suggestedFfmpegCommand = stripCmd;
     } else {
       // Text subtitles (ASS, SSA, SRT, VTT) can be safely extracted directly to .srt
-      const srtCmd = `ffmpeg -y -fflags +genpts -i ${inputPath} -map 0:s:0 "${dirName}/${nameWithoutExt}.en.srt"`;
+      const srtCmd = `ffmpeg -y -fflags +genpts -i ${inputPath} ${subMapFlag} "${dirName}/${nameWithoutExt}.en.srt"`;
       const remuxPlusSrtCmd = `${srtCmd} && ${stripCmd}`;
 
       commandOptions.push({
@@ -671,36 +707,15 @@ export function generateBatchShowCommands(
     if (analysis.needsTranscode) {
       transcodeCount++;
     }
-    const streams = ep.streams || [];
-    const videoStreams = streams.filter((s) => s.type === 'video');
-    const audioStreams = streams.filter((s) => s.type === 'audio');
-    const subtitleStreams = streams.filter((s) => s.type === 'subtitle');
-
-    videoStreams.forEach((v) => {
-      const codec = (v.codec || '').toLowerCase();
-      const pixFmt = (v.pixelFormat || '').toLowerCase();
-      const bitDepth = v.bitDepth || (pixFmt.includes('10le') || pixFmt.includes('p10') ? 10 : 8);
-      if ((codec.includes('h264') || codec.includes('avc')) && (bitDepth > 8 || pixFmt.includes('10le') || v.profile?.toLowerCase().includes('high 10'))) {
-        videoNeedsReencode = true;
-      }
-      if (codec.includes('vc1') || codec.includes('mpeg2') || codec.includes('wmv')) {
-        videoNeedsReencode = true;
-      }
-    });
-
-    audioStreams.forEach((a) => {
-      const codec = (a.codec || '').toLowerCase();
-      if (codec.includes('dts') || codec.includes('truehd') || codec.includes('flac')) {
-        audioNeedsReencode = true;
-      }
-    });
-
-    subtitleStreams.forEach((s) => {
-      const codec = (s.codec || '').toLowerCase();
-      if (codec.includes('pgs') || codec.includes('hdmv') || codec.includes('ass') || codec.includes('vobsub')) {
-        subtitleNeedsExtraction = true;
-      }
-    });
+    if (analysis.recommendation.targetVideoCodec !== 'copy') {
+      videoNeedsReencode = true;
+    }
+    if (analysis.recommendation.targetAudioCodec !== 'copy') {
+      audioNeedsReencode = true;
+    }
+    if (analysis.recommendation.targetSubtitleAction === 'extract_srt') {
+      subtitleNeedsExtraction = true;
+    }
   });
 
   const vCmd = videoNeedsReencode
@@ -713,9 +728,9 @@ export function generateBatchShowCommands(
   let langSuffixNote = '';
 
   if (selectedStreamIndices && selectedStreamIndices.length > 0) {
-    const mapParts = ['-map 0:v'];
+    const mapParts = ['-map "0:v?"'];
     selectedStreamIndices.forEach((idx) => {
-      mapParts.push(`-map 0:${idx}`);
+      mapParts.push(`-map "0:${idx}?"`);
     });
     mapFlags = mapParts.join(' ');
     langSuffixNote = ` Maps selected streams (indices ${selectedStreamIndices.join(', ')}), truncating unselected tracks.`;
