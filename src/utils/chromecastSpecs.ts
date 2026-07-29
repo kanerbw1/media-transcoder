@@ -443,11 +443,15 @@ export function analyzeMediaForChromecast(
     if (sCodec.includes('pgs') || sCodec.includes('hdmv') || sCodec.includes('sup') || sCodec.includes('vobsub') || sCodec.includes('dvd_subtitle')) {
       subtitleNeedsExtraction = true;
       hasBitmapSubs = true;
-      reasons.push(`Bitmap subtitle stream #${sub.index} (${sCodec.toUpperCase()}) forces Jellyfin to perform full video burn-in transcoding.`);
+      reasons.push(
+        `Bitmap subtitle stream #${sub.index} (${sCodec.toUpperCase()}) forces Jellyfin to perform full video burn-in transcoding on Chromecast 4K. With OpenSubtitles active, strip embedded bitmap subs (-sn) so Jellyfin uses your external .srt for 100% Direct Play.`
+      );
     } else if (sCodec.includes('ass') || sCodec.includes('ssa')) {
       subtitleNeedsExtraction = true;
       hasTextSubs = true;
-      reasons.push(`Styled ASS/SSA subtitle stream #${sub.index} will force video burn-in transcoding on Chromecast unless converted to SRT.`);
+      reasons.push(
+        `Styled ASS/SSA subtitle stream #${sub.index} forces video burn-in transcoding on Chromecast unless converted to SubRip (-c:s subrip) inside MKV or replaced with an external OpenSubtitles .srt file.`
+      );
     } else if (sCodec.includes('subrip') || sCodec.includes('srt') || sCodec.includes('vtt') || sCodec.includes('text')) {
       hasTextSubs = true;
     }
