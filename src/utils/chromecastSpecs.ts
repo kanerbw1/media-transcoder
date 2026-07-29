@@ -556,37 +556,45 @@ export function analyzeMediaForChromecast(
       });
       suggestedFfmpegCommand = stripCmd;
     } else {
-      // Text subtitles (ASS, SSA, SRT, VTT) can be safely extracted directly to .srt
+      // Text subtitles (ASS, SSA, SRT, VTT) can be converted to SubRip inside MKV or extracted directly to .srt
       const srtCmd = `ffmpeg -y -fflags +genpts -i ${inputPath} ${subMapFlag} "${dirName}/${nameWithoutExt}.en.srt"`;
       const remuxPlusSrtCmd = `${srtCmd} && ${stripCmd}`;
+      const convertEmbeddedSrtCmd = formatCmd(`ffmpeg ${yFlag}-fflags +genpts -i ${inputPath} ${vCmd} ${aCmd} -c:s subrip ${mapFlags} ${outputPath}`);
 
       commandOptions.push({
-        id: 'remux-plus-srt',
-        label: 'Option 1: Remux MKV & Save Subtitles as External .SRT File',
-        command: remuxPlusSrtCmd,
-        note: 'Extracts the text subtitle track into an external .srt file FIRST, then remuxes the MKV with -sn to strip embedded subtitles from the video file for 100% Direct Play on Chromecast without video burn-in.',
+        id: 'convert-embedded-srt',
+        label: 'Option 1: Convert Embedded Subtitles to SubRip (-c:s subrip) inside MKV',
+        command: convertEmbeddedSrtCmd,
+        note: 'Converts styled ASS/SSA subtitle tracks directly to clean SubRip (.srt) text tracks inside the MKV container. Allows subtitle playback on Chromecast 4K with 0% video transcoding!',
         recommended: true,
       });
       commandOptions.push({
+        id: 'remux-plus-srt',
+        label: 'Option 2: Remux MKV & Save Subtitles as External .SRT File',
+        command: remuxPlusSrtCmd,
+        note: 'Extracts the text subtitle track into an external .srt file FIRST, then remuxes the MKV with -sn to strip embedded subtitles from the video file for 100% Direct Play on Chromecast.',
+        recommended: false,
+      });
+      commandOptions.push({
         id: 'strip-subs',
-        label: 'Option 2: Strip Subtitles (-sn) for 100% Direct Play',
+        label: 'Option 3: Strip Subtitles (-sn) for 100% Direct Play',
         command: stripCmd,
         note: 'Strips subtitle streams completely with -sn. Resolves burn-in notice upon rescan and guarantees 100% Direct Play on Chromecast.',
         recommended: false,
       });
       commandOptions.push({
         id: 'keep-subs-remux',
-        label: 'Option 3: Remux & Keep Subtitles (-c:s copy)',
+        label: 'Option 4: Remux & Keep Subtitles (-c:s copy)',
         command: keepCmd,
         note: langNote ? `${langNote} Preserves selected subtitle tracks.` : 'Preserves selected video, audio, and subtitle tracks in MKV.',
       });
       commandOptions.push({
         id: 'extract-srt-only',
-        label: 'Option 4: Extract Subtitles as External .SRT File Only (No Remux)',
+        label: 'Option 5: Extract Subtitles as External .SRT File Only (No Remux)',
         command: srtCmd,
         note: 'Extracts the subtitle track into a separate external .srt file without touching or re-processing the original video file.',
       });
-      suggestedFfmpegCommand = remuxPlusSrtCmd;
+      suggestedFfmpegCommand = convertEmbeddedSrtCmd;
     }
   } else if (!videoNeedsReencode && audioNeedsReencode) {
     const remuxCmd = formatCmd(`ffmpeg ${yFlag}-fflags +genpts -i ${inputPath} -c:v copy ${aCmd} ${sCmd} ${mapFlags} ${outputPath}`);
