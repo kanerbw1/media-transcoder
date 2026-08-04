@@ -282,14 +282,27 @@ export function buildFfmpegMapFlags(
 ): {
   mapFlags: string;
   mapFlagsNoSubs: string;
+  mapFlagsTextSubsOnly: string;
   truncatedAudioCount: number;
   truncatedSubCount: number;
 } {
   const streams = item.streams || [];
   if (!selectedStreamIndices) {
+    const textSubStreams = streams.filter((s) => {
+      if (s.type !== 'subtitle') return false;
+      const c = (s.codec || '').toLowerCase();
+      return c.includes('subrip') || c.includes('srt') || c.includes('vtt') || c.includes('text') || c.includes('ass') || c.includes('ssa');
+    });
+
+    const mapTextParts = ['-map "0:v?"', '-map "0:a?"'];
+    textSubStreams.forEach((s) => {
+      mapTextParts.push(`-map "0:${s.index}?"`);
+    });
+
     return {
       mapFlags: '-map 0',
       mapFlagsNoSubs: '-map "0:v?" -map "0:a?"',
+      mapFlagsTextSubsOnly: textSubStreams.length > 0 ? mapTextParts.join(' ') : '-map "0:v?" -map "0:a?"',
       truncatedAudioCount: 0,
       truncatedSubCount: 0,
     };
@@ -305,6 +318,7 @@ export function buildFfmpegMapFlags(
 
   const mapParts: string[] = [];
   const mapPartsNoSubs: string[] = [];
+  const mapPartsTextSubsOnly: string[] = [];
 
   // Video
   if (videoStreams.length > 0) {
@@ -313,16 +327,19 @@ export function buildFfmpegMapFlags(
       if (selectedSet.has(v.index)) {
         mapParts.push(`-map "0:${v.index}?"`);
         mapPartsNoSubs.push(`-map "0:${v.index}?"`);
+        mapPartsTextSubsOnly.push(`-map "0:${v.index}?"`);
         videoMapped = true;
       }
     });
     if (!videoMapped) {
       mapParts.push('-map "0:v?"');
       mapPartsNoSubs.push('-map "0:v?"');
+      mapPartsTextSubsOnly.push('-map "0:v?"');
     }
   } else {
     mapParts.push('-map "0:v?"');
     mapPartsNoSubs.push('-map "0:v?"');
+    mapPartsTextSubsOnly.push('-map "0:v?"');
   }
 
   // Audio (Only map audio streams explicitly present in selectedSet)
@@ -330,6 +347,7 @@ export function buildFfmpegMapFlags(
     if (selectedSet.has(a.index)) {
       mapParts.push(`-map "0:${a.index}?"`);
       mapPartsNoSubs.push(`-map "0:${a.index}?"`);
+      mapPartsTextSubsOnly.push(`-map "0:${a.index}?"`);
     }
   });
 
@@ -337,12 +355,18 @@ export function buildFfmpegMapFlags(
   subStreams.forEach((s) => {
     if (selectedSet.has(s.index)) {
       mapParts.push(`-map "0:${s.index}?"`);
+      const c = (s.codec || '').toLowerCase();
+      const isText = c.includes('subrip') || c.includes('srt') || c.includes('vtt') || c.includes('text') || c.includes('ass') || c.includes('ssa');
+      if (isText) {
+        mapPartsTextSubsOnly.push(`-map "0:${s.index}?"`);
+      }
     }
   });
 
   return {
     mapFlags: mapParts.length > 0 ? mapParts.join(' ') : '-map 0',
     mapFlagsNoSubs: mapPartsNoSubs.length > 0 ? mapPartsNoSubs.join(' ') : '-map "0:v?" -map "0:a?"',
+    mapFlagsTextSubsOnly: mapPartsTextSubsOnly.length > 0 ? mapPartsTextSubsOnly.join(' ') : '-map "0:v?" -map "0:a?"',
     truncatedAudioCount: unselectedAudio.length,
     truncatedSubCount: unselectedSub.length,
   };
@@ -494,7 +518,7 @@ export function analyzeMediaForChromecast(
     sCmd = '-c:s copy';
   }
 
-  const { mapFlags, mapFlagsNoSubs, truncatedAudioCount, truncatedSubCount } = buildFfmpegMapFlags(item, selectedStreamIndices);
+  const { mapFlags, mapFlagsNoSubs, mapFlagsTextSubsOnly, truncatedAudioCount, truncatedSubCount } = buildFfmpegMapFlags(item, selectedStreamIndices);
 
   // Determine target subtitle stream for external extraction
   const selectedSubStreams = subtitleStreams.filter((s) =>
@@ -526,31 +550,58 @@ export function analyzeMediaForChromecast(
     const keepCmd = formatCmd(`ffmpeg ${yFlag}-fflags +genpts -i ${inputPath} ${vCmd} ${aCmd} ${sCmd} ${mapFlags} ${outputPath}`);
     const stripCmd = formatCmd(`ffmpeg ${yFlag}-fflags +genpts -i ${inputPath} ${vCmd} ${aCmd} -sn ${mapFlagsNoSubs} ${outputPath}`);
 
-    if (hasBitmapSubs) {
-      // Bitmap subtitles (PGS, SUP, VobSub) cannot be directly exported to raw .sup by FFmpeg without elementary header errors.
-      // Instead, extract to a sidecar .pgs.mkv container or strip embedded bitmap subs (-sn) for Direct Play.
-      const sidecarPgsCmd = `ffmpeg -y -fflags +genpts -i ${inputPath} ${subMapFlag} -c:s copy "${dirName}/${nameWithoutExt}.en.pgs.mkv"`;
-      const remuxPlusPgsCmd = `${sidecarPgsCmd} && ${stripCmd}`;
+    if (hasBitmapSubs && hasTextSubs) {
+      // Both Bitmap (PGS) and Text (SRT/SubRip/VTT/ASS) exist.
+      // Strip bitmap subs while preserving direct-streamable text subs (converting ASS to subrip if needed)
+      const keepTextOnlyCmd = formatCmd(`ffmpeg ${yFlag}-fflags +genpts -i ${inputPath} ${vCmd} ${aCmd} -c:s subrip ${mapFlagsTextSubsOnly} ${outputPath}`);
 
       commandOptions.push({
-        id: 'strip-subs',
-        label: 'Option 1: Strip Bitmap Subtitles (-sn) for 100% Direct Play (Recommended)',
-        command: stripCmd,
-        note: 'Strips bitmap PGS subtitles completely with -sn to guarantee 100% Direct Play on Chromecast 4K without video burn-in transcode. Use Bazarr or OpenSubtitles to fetch clean text .srt files.',
+        id: 'keep-text-strip-bitmap',
+        label: 'Option 1: Keep Direct Streamable Text Subtitles & Strip Bitmap Subs (Recommended)',
+        command: keepTextOnlyCmd,
+        note: 'Preserves text subtitles (SubRip/SRT) while stripping transcode-forcing bitmap (PGS) subtitles. Guarantees 100% Direct Play on Chromecast 4K with a working subtitle track!',
         recommended: true,
       });
       commandOptions.push({
-        id: 'remux-plus-pgs',
-        label: 'Option 2: Remux MKV & Save PGS Subtitles as External Sidecar (.pgs.mkv)',
-        command: remuxPlusPgsCmd,
-        note: 'Extracts the PGS subtitle track into a sidecar .pgs.mkv container FIRST (preventing raw .sup FFmpeg packet errors), then remuxes the MKV with -sn to strip embedded PGS subtitles.',
+        id: 'strip-subs',
+        label: 'Option 2: Strip All Subtitles (-sn) for 100% Direct Play',
+        command: stripCmd,
+        note: 'Strips embedded subtitle streams completely with -sn. Use OpenSubtitles to fetch an external .srt file.',
         recommended: false,
       });
       commandOptions.push({
         id: 'keep-subs-remux',
-        label: 'Option 3: Remux & Keep Subtitles (-c:s copy)',
+        label: 'Option 3: Remux & Keep All Subtitles (-c:s copy)',
         command: keepCmd,
-        note: langNote ? `${langNote} Preserves selected subtitle tracks.` : 'Preserves selected video, audio, and subtitle tracks inside MKV. (Note: Keeps PGS subtitles embedded in MKV. Turning PGS subtitles ON in Jellyfin will trigger transcode).',
+        note: langNote ? `${langNote} Preserves all subtitle tracks.` : 'Preserves all subtitle tracks inside MKV. (Note: Turning PGS subtitles ON in Jellyfin will trigger transcode).',
+      });
+      suggestedFfmpegCommand = keepTextOnlyCmd;
+    } else if (hasBitmapSubs && !hasTextSubs) {
+      // Only Bitmap subs exist (PGS/VOBSub) and NO text subs inside container.
+      // Per user request: keep the subtitle track if it's the only one remaining in the file.
+      const sidecarPgsCmd = `ffmpeg -y -fflags +genpts -i ${inputPath} ${subMapFlag} -c:s copy "${dirName}/${nameWithoutExt}.en.pgs.mkv"`;
+      const remuxPlusPgsCmd = `${sidecarPgsCmd} && ${stripCmd}`;
+
+      commandOptions.push({
+        id: 'keep-subs-remux',
+        label: 'Option 1: Remux & Keep Subtitles (-c:s copy) (Preserves Subtitle Track)',
+        command: keepCmd,
+        note: 'Preserves the embedded bitmap subtitle track (PGS) so a subtitle track remains available in the file. (Note: Turning on PGS subtitles in Jellyfin triggers video transcode. Use OpenSubtitles to fetch an external .srt for Direct Play).',
+        recommended: true,
+      });
+      commandOptions.push({
+        id: 'strip-subs',
+        label: 'Option 2: Strip Bitmap Subtitles (-sn) for 100% Direct Play',
+        command: stripCmd,
+        note: 'Strips bitmap PGS subtitles completely with -sn to guarantee 100% Direct Play without video transcode. Use OpenSubtitles to fetch an external .srt file.',
+        recommended: false,
+      });
+      commandOptions.push({
+        id: 'remux-plus-pgs',
+        label: 'Option 3: Remux MKV & Save PGS Subtitles as External Sidecar (.pgs.mkv)',
+        command: remuxPlusPgsCmd,
+        note: 'Extracts the PGS subtitle track into a sidecar .pgs.mkv container FIRST, then remuxes the MKV with -sn to strip embedded PGS subtitles.',
+        recommended: false,
       });
       commandOptions.push({
         id: 'extract-pgs-only',
@@ -558,7 +609,7 @@ export function analyzeMediaForChromecast(
         command: sidecarPgsCmd,
         note: 'Extracts the bitmap subtitle track into a separate .pgs.mkv sidecar container without touching the original video file.',
       });
-      suggestedFfmpegCommand = stripCmd;
+      suggestedFfmpegCommand = keepCmd;
     } else {
       // Text subtitles (ASS, SSA, SRT, VTT) can be converted to SubRip inside MKV or extracted directly to .srt
       const srtCmd = `ffmpeg -y -fflags +genpts -i ${inputPath} ${subMapFlag} "${dirName}/${nameWithoutExt}.en.srt"`;
